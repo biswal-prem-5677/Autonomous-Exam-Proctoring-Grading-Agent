@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Exam Intelligence Agent — Home{% endblock %}
+
+{% block styles %}
+<style>
+    .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        background: rgba(34, 211, 238, 0.1);
+        border: 1px solid rgba(34, 211, 238, 0.2);
+        border-radius: 9999px;
+        font-size: 0.875rem;
+        color: var(--accent-primary);
+        margin-bottom: var(--space-lg);
+    }
+
+    .hero-badge svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .hero-stats {
+        display: flex;
+        justify-content: center;
+        gap: var(--space-xl);
+        margin-top: var(--space-xl);
+    }
+
+    .hero-stat {
+        text-align: center;
+    }
+
+    .hero-stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        font-family: var(--font-mono);
+        color: var(--accent-primary);
+    }
+
+    .hero-stat-label {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+    }
+
+    .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-lg);
+        margin-top: var(--space-xl);
+    }
+
+    .quick-action {
+        display: flex;
+        align-items: center;
+        gap: var(--space-lg);
+        padding: var(--space-lg);
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        transition: all var(--transition-base);
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .quick-action:hover {
+        border-color: var(--accent-primary);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-glow);
+    }
+
+    .quick-action-icon {
+        width: 48px;
+        height: 48px;
+        background: rgba(34, 211, 238, 0.1);
+        border-radius: var(--radius-md);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--accent-primary);
+    }
+
+    .quick-action-icon svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .quick-action-text h4 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .quick-action-text p {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+    }
+
+    .demo-section {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: var(--space-xl);
+        margin-top: var(--space-xl);
+    }
+
+    .demo-section h3 {
+        margin-bottom: var(--space-lg);
+    }
+
+    .demo-actions {
+        display: flex;
+        gap: var(--space-md);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <div class="hero-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span>Privacy-First • Local-Only • No External APIs</span>
+    </div>
+
+    <h1>Autonomous Exam<br>Intelligence Agent</h1>
+    <p>
+        A comprehensive exam proctoring and grading system that combines multimodal behavioral analysis,
+        supervised risk prediction, statistical anomaly detection, and temporal evidence fusion — all running locally.
+    </p>
+
+    <div class="hero-actions">
+        <a href="/student" class="btn btn-primary btn-lg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                <polyline points="14,2 14,8 20,8"/>
+            </svg>
+            Take an Exam
+        </a>
+        <a href="/examiner" class="btn btn-secondary btn-lg">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="3" y1="9" x2="21" y2="9"/>
+                <line x1="9" y1="21" x2="9" y2="9"/>
+            </svg>
+            Examiner Dashboard
+        </a>
+    </div>
+
+    <div class="hero-stats">
+        <div class="hero-stat">
+            <div class="hero-stat-value" id="stat-exams">—</div>
+            <div class="hero-stat-label">Active Exams</div>
+        </div>
+        <div class="hero-stat">
+            <div class="hero-stat-value" id="stat-sessions">—</div>
+            <div class="hero-stat-label">Sessions Today</div>
+        </div>
+        <div class="hero-stat">
+            <div class="hero-stat-value" id="stat-models">✓</div>
+            <div class="hero-stat-label">ML Models Ready</div>
+        </div>
+    </div>
+</div>
+
+<section>
+    <h3>Key Capabilities</h3>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                </svg>
+            </div>
+            <div class="feature-title">Vision Analysis</div>
+            <div class="feature-description">
+                Face detection, head pose estimation, gaze tracking, and movement analysis using local computer vision.
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="4" width="20" height="16" rx="2" ry="2"/>
+                    <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M8 16h8"/>
+                </svg>
+            </div>
+            <div class="feature-title">Behavioral Biometrics</div>
+            <div class="feature-description">
+                Keystroke dynamics, mouse movement patterns, and typing rhythm analysis for anomaly detection.
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+            </div>
+            <div class="feature-title">Automated Grading</div>
+            <div class="feature-description">
+                MCQ, numerical tolerance-based, and short-answer grading using TF-IDF, cosine similarity, and keyword coverage.
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="20" x2="18" y2="10"/>
+                    <line x1="12" y1="20" x2="12" y2="4"/>
+                    <line x1="6" y1="20" x2="6" y2="14"/>
+                </svg>
+            </div>
+            <div class="feature-title">Risk Prediction</div>
+            <div class="feature-description">
+                Logistic regression classifier with statistical anomaly detection (Z-score, Mahalanobis distance).
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                </svg>
+            </div>
+            <div class="feature-title">Temporal Fusion</div>
+            <div class="feature-description">
+                Risk accumulates over time with decay: R_t = α × R_{t-1} + (1-α) × E_t for adaptive monitoring.
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+            </div>
+            <div class="feature-title">Explainable Reports</div>
+            <div class="feature-description">
+                Clear evidence logs, risk breakdowns, and performance analytics for human review.
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <h3>Quick Actions</h3>
+    <div class="quick-actions">
+        <a href="/student" class="quick-action">
+            <div class="quick-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+                    <polyline points="10 17 15 12 10 7"/>
+                    <line x1="15" y1="12" x2="3" y2="12"/>
+                </svg>
+            </div>
+            <div class="quick-action-text">
+                <h4>Start Student Exam</h4>
+                <p>Begin a new exam session with live proctoring</p>
+            </div>
+        </a>
+
+        <a href="/examiner" class="quick-action">
+            <div class="quick-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 010 7.75"/>
+                </svg>
+            </div>
+            <div class="quick-action-text">
+                <h4>Monitor Exams</h4>
+                <p>View live student progress and risk analysis</p>
+            </div>
+        </a>
+
+        <a href="/training" class="quick-action">
+            <div class="quick-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+            </div>
+            <div class="quick-action-text">
+                <h4>Train ML Models</h4>
+                <p>Generate data and train risk prediction models</p>
+            </div>
+        </a>
+
+        <a href="/analytics" class="quick-action">
+            <div class="quick-action-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="20" x2="18" y2="10"/>
+                    <line x1="12" y1="20" x2="12" y2="4"/>
+                    <line x1="6" y1="20" x2="6" y2="14"/>
+                </svg>
+            </div>
+            <div class="quick-action-text">
+                <h4>View Analytics</h4>
+                <p>Performance predictions and topic analysis</p>
+            </div>
+        </a>
+    </div>
+</section>
+
+<section>
+    <div class="demo-section">
+        <h3>🔧 Demo Mode</h3>
+        <p class="text-secondary mb-lg">
+            Set up a complete demo with sample exam, questions, and students to explore all features.
+        </p>
+        <div class="demo-actions">
+            <button class="btn btn-primary" id="btn-setup-demo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Setup Demo
+            </button>
+            <button class="btn btn-secondary" id="btn-train-demo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                    <path d="M23 4v6h-6"/>
+                    <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
+                </svg>
+                Train Models
+            </button>
+        </div>
+        <div id="demo-status" class="mt-md text-muted" style="font-size: 0.875rem;"></div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load stats
+    try {
+        const health = await API.health();
+        const exams = await API.listExams();
+        document.getElementById('stat-exams').textContent = exams.count || 0;
+    } catch (e) {
+        console.error('Failed to load stats:', e);
+    }
+
+    // Setup demo
+    document.getElementById('btn-setup-demo').addEventListener('click', async () => {
+        const btn = document.getElementById('btn-setup-demo');
+        const status = document.getElementById('demo-status');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;"></span> Setting up...';
+
+        try {
+            const result = await API.demoSetup({});
+            status.innerHTML = `✓ Demo ready: <strong>${result.exam_id}</strong> with ${result.question_count} questions`;
+            showToast('Demo exam created successfully!', 'success');
+
+            // Auto-navigate to examiner dashboard
+            setTimeout(() => window.location.href = '/examiner', 1500);
+        } catch (e) {
+            status.textContent = 'Error: ' + e.message;
+            showToast('Failed to setup demo: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="5 3 19 12 5 21 5 3"/></svg> Setup Demo`;
+        }
+    });
+
+    // Train models
+    document.getElementById('btn-train-demo').addEventListener('click', async () => {
+        const btn = document.getElementById('btn-train-demo');
+        const status = document.getElementById('demo-status');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;"></span> Training...';
+
+        try {
+            const result = await API.trainModels({ n_normal: 100, n_suspicious: 50 });
+            status.innerHTML = `✓ Models trained! LR: ${result.logistic_regression.metrics.accuracy.toFixed(2)} acc, Anomaly: ${result.anomaly_detection.metrics.accuracy.toFixed(2)} acc`;
+            showToast('ML models trained successfully!', 'success');
+        } catch (e) {
+            status.textContent = 'Error: ' + e.message;
+            showToast('Failed to train models: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg> Train Models`;
+        }
+    });
+});
+</script>
+{% endblock %}

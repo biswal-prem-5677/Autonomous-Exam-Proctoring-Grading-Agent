@@ -1,0 +1,634 @@
+{% extends "base.html" %}
+
+{% block title %}Examiner Dashboard — Exam Intelligence Agent{% endblock %}
+
+{% block styles %}
+<style>
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+    }
+
+    .dashboard-header h1 {
+        font-size: 1.75rem;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 12px;
+    }
+
+    .dashboard-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .stat-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        text-align: center;
+        transition: all var(--transition-base);
+    }
+
+    .stat-card:hover {
+        border-color: rgba(34, 211, 238, 0.3);
+    }
+
+    .stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        font-family: var(--font-mono);
+        color: var(--accent-primary);
+    }
+
+    .stat-value.warning { color: var(--accent-warning); }
+    .stat-value.danger { color: var(--accent-danger); }
+    .stat-value.success { color: var(--accent-success); }
+
+    .stat-label {
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .filters-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .filter-group {
+        display: flex;
+        gap: 8px;
+    }
+
+    .filter-btn {
+        padding: 6px 14px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        font-family: var(--font-sans);
+    }
+
+    .filter-btn:hover {
+        border-color: var(--accent-primary);
+        color: var(--text-primary);
+    }
+
+    .filter-btn.active {
+        background: rgba(34, 211, 238, 0.1);
+        border-color: var(--accent-primary);
+        color: var(--accent-primary);
+    }
+
+    .students-table {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+    }
+
+    .student-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 1fr 1fr 80px;
+        gap: 16px;
+        padding: 14px 24px;
+        align-items: center;
+        border-bottom: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+    }
+
+    .student-row:hover {
+        background: var(--bg-hover);
+    }
+
+    .student-row:last-child {
+        border-bottom: none;
+    }
+
+    .student-row.header {
+        background: var(--bg-tertiary);
+        font-weight: 600;
+        font-size: 0.8125rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        cursor: default;
+    }
+
+    .student-row.header:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .student-name {
+        font-weight: 500;
+    }
+
+    .student-id {
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+    }
+
+    .risk-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .risk-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        flex-shrink: 0;
+    }
+
+    .progress-bar {
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+        margin-top: 4px;
+    }
+
+    .progress-fill {
+        height: 100%;
+        border-radius: var(--radius-full);
+        transition: width var(--transition-base);
+    }
+
+    /* Student Detail Panel */
+    .detail-panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        margin-top: 24px;
+        overflow: hidden;
+    }
+
+    .detail-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 24px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .detail-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .detail-section {
+        padding: 24px;
+        border-right: 1px solid var(--border-color);
+    }
+
+    .detail-section:last-child {
+        border-right: none;
+    }
+
+    .detail-section-title {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 16px;
+    }
+
+    .contributing-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .contributing-item:last-child {
+        border-bottom: none;
+    }
+
+    .signal-name {
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .signal-contribution {
+        font-family: var(--font-mono);
+        font-size: 0.9375rem;
+        font-weight: 600;
+    }
+
+    .signal-contribution.positive { color: var(--accent-danger); }
+    .signal-contribution.negative { color: var(--accent-success); }
+
+    .evidence-timeline {
+        padding: 0;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .evidence-item {
+        display: grid;
+        grid-template-columns: 100px 1fr;
+        gap: 16px;
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .evidence-time {
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+    }
+
+    .evidence-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .evidence-type {
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .evidence-confidence {
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+    }
+
+    .empty-panel {
+        padding: 48px 24px;
+        text-align: center;
+        color: var(--text-muted);
+    }
+
+    @media (max-width: 1200px) {
+        .dashboard-stats { grid-template-columns: repeat(2, 1fr); }
+        .student-row { grid-template-columns: 2fr 1fr 1fr 80px; }
+        .student-row .risk-cell, .student-row .events-cell { display: none; }
+        .detail-body { grid-template-columns: 1fr; }
+        .detail-section { border-right: none; border-bottom: 1px solid var(--border-color); }
+    }
+
+    @media (max-width: 768px) {
+        .dashboard-stats { grid-template-columns: 1fr 1fr; }
+        .student-row { grid-template-columns: 1fr; gap: 4px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <div>
+        <h1>Examiner Dashboard</h1>
+        <p class="text-secondary">Real-time monitoring and risk analysis</p>
+    </div>
+    <div class="header-actions">
+        <button class="btn btn-secondary" id="btn-refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            Refresh
+        </button>
+        <a href="/training" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Train Models
+        </a>
+    </div>
+</div>
+
+<div class="dashboard-stats" id="dashboard-stats">
+    <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Active Students</div></div>
+    <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Review Required</div></div>
+    <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Avg Integrity Risk</div></div>
+    <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Avg Score</div></div>
+</div>
+
+<div class="filters-row">
+    <div class="filter-group">
+        <button class="filter-btn active" data-filter="all">All Students</button>
+        <button class="filter-btn" data-filter="normal">Normal</button>
+        <button class="filter-btn" data-filter="suspicious">Suspicious</button>
+        <button class="filter-btn" data-filter="high_risk">High Risk</button>
+    </div>
+    <div class="text-secondary" style="font-size: 0.875rem;">
+        Select a student to view details
+    </div>
+</div>
+
+<div class="students-table" id="students-table">
+    <div class="student-row header">
+        <div>Student</div>
+        <div>Progress</div>
+        <div class="risk-cell">Risk</div>
+        <div>Status</div>
+        <div class="events-cell">Events</div>
+    </div>
+    <div id="students-list">
+        <div class="empty-panel">Loading students...</div>
+    </div>
+</div>
+
+<!-- Student Detail Panel -->
+<div id="student-detail" class="detail-panel hidden">
+    <div id="detail-content"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentFilter = 'all';
+let allStudents = [];
+let selectedStudent = null;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('btn-refresh').addEventListener('click', loadDashboard);
+
+    // Filter buttons
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFilter = btn.dataset.filter;
+            renderStudents();
+        });
+    });
+
+    await loadDashboard();
+});
+
+async function loadDashboard() {
+    try {
+        const exams = await API.listExams();
+        if (exams.count === 0) {
+            await API.demoSetup({});
+        }
+
+        const examsList = await API.listExams();
+        const overview = await API.getExamOverview(examsList.exams[0].exam_id);
+        renderOverview(overview);
+        allStudents = overview.students || [];
+        renderStudents();
+    } catch (e) {
+        showToast('Failed to load dashboard: ' + e.message, 'error');
+    }
+}
+
+function renderOverview(data) {
+    const stats = document.getElementById('dashboard-stats');
+    stats.innerHTML = `
+        <div class="stat-card">
+            <div class="stat-value">${data.total_students}</div>
+            <div class="stat-label">Total Students</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value ${data.review_required > 0 ? 'warning' : 'success'}">${data.review_required}</div>
+            <div class="stat-label">Review Required</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value ${data.average_risk > 0.5 ? 'danger' : ''}">${(data.average_risk * 100).toFixed(0)}%</div>
+            <div class="stat-label">Avg Integrity Risk</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value success">${data.average_score.toFixed(1)}%</div>
+            <div class="stat-label">Avg Score</div>
+        </div>
+    `;
+}
+
+function renderStudents() {
+    const list = document.getElementById('students-list');
+    let filtered = allStudents;
+
+    if (currentFilter === 'high_risk') {
+        filtered = allStudents.filter(s => s.state === 'HIGH_RISK' || s.state === 'REVIEW_REQUIRED');
+    } else if (currentFilter !== 'all') {
+        filtered = allStudents.filter(s => s.state.toLowerCase().includes(currentFilter));
+    }
+
+    if (filtered.length === 0) {
+        list.innerHTML = `<div class="empty-panel">No students found${currentFilter !== 'all' ? ' matching filter' : ''}. Setup a demo exam first.</div>`;
+        return;
+    }
+
+    list.innerHTML = filtered.map(s => {
+        const stateInfo = getStateLevel(s.state);
+        const riskLevel = getRiskLevel(s.risk_score);
+        const progressPct = s.total_questions > 0 ? (s.answers_count / s.total_questions * 100) : 0;
+        const progressInfo = getProgressLevel(progressPct);
+
+        return `
+            <div class="student-row" data-id="${s.student_id}" data-exam="${s.session_id || ''}">
+                <div>
+                    <div class="student-name">${escapeHtml(s.student_id)}</div>
+                    <div class="student-id">Session: ${s.session_id || '-'}</div>
+                </div>
+                <div>
+                    <div>${s.answers_count}/${s.total_questions}</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill ${progressInfo.class}" style="width: ${progressPct}%"></div>
+                    </div>
+                </div>
+                <div class="risk-cell">
+                    <div class="risk-dot" style="background: var(--accent-${riskLevel.class})"></div>
+                    <span class="text-muted" style="font-family: var(--font-mono); font-size: 0.875rem;">${(s.risk_score * 100).toFixed(0)}%</span>
+                </div>
+                <div><span class="badge badge-${stateInfo.class}">${stateInfo.label}</span></div>
+                <div><span style="font-family: var(--font-mono); font-size: 0.875rem;">${s.events_count}</span></div>
+            </div>
+        `;
+    }).join('');
+
+    // Bind click events
+    list.querySelectorAll('.student-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const studentId = row.dataset.id;
+            const examId = row.dataset.exam;
+            if (studentId) showStudentDetail(studentId, examId);
+        });
+    });
+}
+
+async function showStudentDetail(studentId, examId) {
+    const panel = document.getElementById('student-detail');
+    const content = document.getElementById('detail-content');
+
+    panel.classList.remove('hidden');
+    content.innerHTML = `<div class="empty-panel"><div class="spinner"></div><p class="mt-md">Loading student detail...</p></div>`;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    try {
+        const data = await API.getStudentDetail(studentId, examId);
+        renderStudentDetail(data);
+    } catch (e) {
+        content.innerHTML = `<div class="empty-panel"><h3>Error</h3><p>${escapeHtml(e.message)}</p></div>`;
+    }
+}
+
+function renderStudentDetail(data) {
+    const content = document.getElementById('detail-content');
+    const riskLevel = getRiskLevel(data.risk_score);
+    const stateInfo = getStateLevel(data.state);
+
+    // Contributing signals
+    let signalsHtml = '';
+    if (data.contributing_signals && data.contributing_signals.length > 0) {
+        signalsHtml = data.contributing_signals.map(s => {
+            const cls = s.contribution > 0 ? 'positive' : 'negative';
+            const sign = s.contribution > 0 ? '+' : '';
+            return `
+                <div class="contributing-item">
+                    <span class="signal-name">${escapeHtml(s.signal)}</span>
+                    <span class="signal-contribution ${cls}">${sign}${s.contribution.toFixed(1)}</span>
+                </div>
+            `;
+        }).join('');
+    } else {
+        signalsHtml = '<div style="color: var(--text-muted); font-size: 0.875rem;">No contributing signals detected</div>';
+    }
+
+    // Risk timeline
+    let timelineHtml = '';
+    if (data.risk_timeline && data.risk_timeline.length > 0) {
+        timelineHtml = data.risk_timeline.map(t => {
+            const time = formatDate(t.timestamp);
+            const events = t.events && t.events.length > 0
+                ? t.events.map(e => e.type).join(', ')
+                : 'No events';
+            return `
+                <div class="evidence-item">
+                    <div class="evidence-time">${time}</div>
+                    <div class="evidence-content">
+                        <span class="evidence-type">${escapeHtml(events)}</span>
+                        <span style="font-family: var(--font-mono); color: var(--accent-primary);">${(t.risk_score * 100).toFixed(0)}%</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } else {
+        timelineHtml = '<div class="empty-panel" style="padding: 24px;">No risk timeline data available</div>';
+    }
+
+    // Evidence timeline
+    let evidenceHtml = '';
+    const evidenceTimeline = data.evidence?.timeline || [];
+    if (evidenceTimeline.length > 0) {
+        evidenceHtml = evidenceTimeline.map(e => {
+            const time = formatDate(e.timestamp_iso);
+            const sevClass = e.severity === 'critical' ? 'danger' : e.severity === 'warning' ? 'warning' : 'info';
+            return `
+                <div class="evidence-item">
+                    <div class="evidence-time">${time}</div>
+                    <div class="evidence-content">
+                        <span class="badge badge-${sevClass}">${escapeHtml(e.event_type)}</span>
+                        <span class="evidence-confidence">${(e.confidence * 100).toFixed(0)}% conf.</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } else {
+        evidenceHtml = '<div class="empty-panel" style="padding: 24px;">No evidence recorded</div>';
+    }
+
+    // Grading summary
+    const grading = data.grading || {};
+    const pct = grading.percentage || 0;
+    const gradeColor = pct >= 70 ? 'success' : pct >= 50 ? 'warning' : 'danger';
+
+    content.innerHTML = `
+        <div class="detail-header">
+            <div>
+                <h3>${escapeHtml(data.student_id)}</h3>
+                <p class="text-secondary">${escapeHtml(data.exam_title)}</p>
+            </div>
+            <div style="display: flex; gap: 16px; align-items: center;">
+                <div style="text-align: center;">
+                    <div class="stat-value ${gradeColor}" style="font-size: 1.75rem;">${grading.percentage.toFixed(1)}%</div>
+                    <div class="stat-label">Score</div>
+                </div>
+                <div style="text-align: center;">
+                    <div class="stat-value ${riskLevel.class}" style="font-size: 1.75rem;">${(data.risk_score * 100).toFixed(0)}%</div>
+                    <div class="stat-label">Risk</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="detail-body">
+            <div class="detail-section">
+                <div class="detail-section-title">Risk Status</div>
+                <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+                    <span class="badge badge-${stateInfo.class}">${stateInfo.label}</span>
+                    <span style="font-family: var(--font-mono);">${(data.risk_score * 100).toFixed(1)} / 100</span>
+                </div>
+                <div class="detail-section-title">Contributing Signals</div>
+                ${signalsHtml}
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-title">Signal Activity</div>
+                ${data.signal_activity && data.signal_activity.length > 0 ? data.signal_activity.map(s => `
+                    <div class="signal-bar">
+                        <span class="signal-label">${escapeHtml(s.signal)}</span>
+                        <div class="signal-track">
+                            <div class="signal-fill" style="width: ${s.activity_level * 100}%"></div>
+                        </div>
+                        <span class="signal-value">${s.count}</span>
+                    </div>
+                `).join('') : '<div style="color: var(--text-muted); font-size: 0.875rem;">No signal activity recorded</div>'}
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr;">
+            <div class="detail-section">
+                <div class="detail-section-title">Risk Timeline</div>
+                ${timelineHtml}
+            </div>
+            <div class="detail-section">
+                <div class="detail-section-title">Evidence Log</div>
+                ${evidenceHtml}
+            </div>
+        </div>
+
+        <div style="padding: 24px; border-top: 1px solid var(--border-color);">
+            <div class="detail-section-title">Score Breakdown</div>
+            ${grading.per_question ? Object.entries(grading.per_question).map(([qid, q]) => {
+                const qpct = q.max_score > 0 ? (q.score / q.max_score * 100) : 0;
+                const cls = qpct >= 70 ? 'success' : qpct >= 40 ? 'warning' : 'danger';
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-subtle);">
+                        <span style="font-size: 0.875rem;">${escapeHtml(q.question_text || 'Q')}</span>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div class="progress-bar" style="width: 80px;">
+                                <div class="progress-fill ${cls}" style="width: ${qpct}%"></div>
+                            </div>
+                            <span style="font-family: var(--font-mono); font-size: 0.8125rem; width: 60px; text-align: right;">${q.score.toFixed(1)}/${q.max_score}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('') : '<div style="color: var(--text-muted); font-size: 0.875rem;">No grading data available</div>'}
+        </div>
+    `;
+}
+</script>
+{% endblock %}

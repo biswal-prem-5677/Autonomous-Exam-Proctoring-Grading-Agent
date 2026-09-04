@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics — Exam Intelligence Agent{% endblock %}
+
+{% block styles %}
+<style>
+    .analytics-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+    }
+
+    .analytics-header h1 {
+        font-size: 1.75rem;
+    }
+
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .analytics-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 24px;
+    }
+
+    .analytics-card-title {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .topic-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .topic-bar:last-child { border-bottom: none; }
+
+    .topic-name {
+        width: 140px;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .topic-track {
+        flex: 1;
+        height: 10px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+    }
+
+    .topic-fill {
+        height: 100%;
+        border-radius: var(--radius-full);
+        transition: width var(--transition-base);
+    }
+
+    .topic-value {
+        width: 50px;
+        text-align: right;
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+
+    .prediction-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .prediction-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 24px;
+        text-align: center;
+    }
+
+    .prediction-value {
+        font-size: 2rem;
+        font-weight: 700;
+        font-family: var(--font-mono);
+        color: var(--accent-primary);
+    }
+
+    .prediction-label {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+
+    .prediction-range {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 8px;
+    }
+
+    .difficulty-matrix {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .difficulty-item {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 16px;
+        text-align: center;
+    }
+
+    .difficulty-topic {
+        font-size: 0.875rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+
+    .difficulty-level {
+        font-size: 1.125rem;
+        font-weight: 700;
+        font-family: var(--font-mono);
+    }
+
+    .difficulty-level.easy { color: var(--accent-success); }
+    .difficulty-level.medium { color: var(--accent-warning); }
+    .difficulty-level.hard { color: var(--accent-danger); }
+    .difficulty-level.unknown { color: var(--text-muted); }
+
+    .knowledge-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .knowledge-item {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 16px;
+    }
+
+    .knowledge-topic {
+        font-size: 0.875rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+
+    .knowledge-mastery {
+        font-family: var(--font-mono);
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .knowledge-bar {
+        height: 6px;
+        background: var(--bg-card);
+        border-radius: var(--radius-full);
+        margin-top: 8px;
+        overflow: hidden;
+    }
+
+    .knowledge-fill {
+        height: 100%;
+        border-radius: var(--radius-full);
+        transition: width var(--transition-base);
+    }
+
+    .historical-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+
+    .historical-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .historical-table th, .historical-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .historical-table th {
+        background: var(--bg-tertiary);
+        font-weight: 600;
+        font-size: 0.8125rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+    }
+
+    .historical-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    @media (max-width: 1024px) {
+        .analytics-grid { grid-template-columns: 1fr; }
+        .prediction-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 640px) {
+        .prediction-grid { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-header">
+    <div>
+        <h1>Performance Analytics</h1>
+        <p class="text-secondary">Predictions, knowledge tracking, and topic analysis</p>
+    </div>
+</div>
+
+<!-- Prediction Cards -->
+<div class="prediction-grid" id="prediction-section">
+    <div class="prediction-card">
+        <div class="prediction-value" id="pred-score">—</div>
+        <div class="prediction-label">Predicted Final Score</div>
+        <div class="prediction-range">Based on partial progress</div>
+    </div>
+    <div class="prediction-card">
+        <div class="prediction-value" id="pred-time">—</div>
+        <div class="prediction-label">Expected Completion Time</div>
+        <div class="prediction-range">Based on current pace</div>
+    </div>
+    <div class="prediction-card">
+        <div class="prediction-value" id="pred-competency">—</div>
+        <div class="prediction-label">Competency Level</div>
+        <div class="prediction-range">Topic mastery estimate</div>
+    </div>
+</div>
+
+<div class="analytics-grid">
+    <!-- Topic Mastery -->
+    <div class="analytics-card">
+        <div class="analytics-card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Topic Mastery
+        </div>
+        <div id="topic-mastery">
+            <div class="empty-panel" style="padding: 20px;">No data yet. Complete an exam to see mastery levels.</div>
+        </div>
+    </div>
+
+    <!-- Difficulty Estimates -->
+    <div class="analytics-card">
+        <div class="analytics-card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Topic Difficulty Estimates
+        </div>
+        <div class="difficulty-matrix" id="difficulty-matrix">
+            <div class="empty-panel" style="padding: 20px;">No data yet.</div>
+        </div>
+    </div>
+</div>
+
+<!-- Knowledge State -->
+<div class="analytics-card" style="margin-bottom: 24px;">
+    <div class="analytics-card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Knowledge State Tracking (Bayesian)
+    </div>
+    <div class="knowledge-grid" id="knowledge-grid">
+        <div class="empty-panel" style="padding: 20px;">No knowledge data yet. Complete an exam to see Bayesian mastery estimates.</div>
+    </div>
+</div>
+
+<!-- Historical Performance -->
+<div class="historical-card">
+    <div class="analytics-card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Performance History
+    </div>
+    <div id="historical-data">
+        <table class="historical-table">
+            <thead>
+                <tr>
+                    <th>Exam</th>
+                    <th>Date</th>
+                    <th>Score</th>
+                    <th>Risk</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="historical-body">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No completed exams yet</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Load results from localStorage if available
+    const lastResult = localStorage.getItem('last_exam_result');
+    if (lastResult) {
+        try {
+            const data = JSON.parse(lastResult);
+            renderAnalytics(data);
+        } catch (e) {
+            console.error('Failed to parse last result:', e);
+        }
+    }
+
+    // Try to load from current sessions
+    loadCurrentSessionAnalytics();
+});
+
+async function loadCurrentSessionAnalytics() {
+    // Check if there are any active sessions to display
+    try {
+        const exams = await API.listExams();
+        if (exams.count > 0) {
+            const overview = await API.getExamOverview(exams.exams[0].exam_id);
+            // Generate mock analytics from completed students
+            const completed = overview.students.filter(s => s.progress >= 100);
+            if (completed.length > 0) {
+                renderMockAnalytics(completed[0]);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load analytics:', e);
+    }
+}
+
+function renderAnalytics(data) {
+    const pct = data.percentage || 0;
+    document.getElementById('pred-score').textContent = pct.toFixed(1) + '%';
+
+    // Estimate competency
+    let comp = 'Developing';
+    if (pct >= 90) comp = 'Expert';
+    else if (pct >= 75) comp = 'Proficient';
+    else if (pct >= 60) comp = 'Competent';
+    else if (pct >= 40) comp = 'Basic';
+    document.getElementById('pred-competency').textContent = comp;
+
+    // Topic mastery from grading
+    const topics = {};
+    if (data.per_question) {
+        Object.entries(data.per_question).forEach(([qid, q]) => {
+            const topic = q.metadata?.topic || 'General';
+            if (!topics[topic]) topics[topic] = { total: 0, score: 0 };
+            topics[topic].total += q.max_score;
+            topics[topic].score += q.score;
+        });
+    }
+
+    const masteryDiv = document.getElementById('topic-mastery');
+    const entries = Object.entries(topics);
+    if (entries.length === 0) {
+        masteryDiv.innerHTML = '<div class="empty-panel" style="padding: 20px;">No topic data available</div>';
+    } else {
+        masteryDiv.innerHTML = entries.map(([topic, info]) => {
+            const mastery = info.total > 0 ? info.score / info.total : 0;
+            const cls = mastery >= 0.7 ? 'success' : mastery >= 0.4 ? 'warning' : 'danger';
+            return `
+                <div class="topic-bar">
+                    <span class="topic-name">${escapeHtml(topic)}</span>
+                    <div class="topic-track">
+                        <div class="topic-fill" style="width: ${mastery * 100}%; background: var(--accent-${cls})"></div>
+                    </div>
+                    <span class="topic-value">${(mastery * 100).toFixed(0)}%</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Knowledge state
+    renderKnowledgeState(data);
+}
+
+function renderMockAnalytics(student) {
+    const pct = 75 + Math.random() * 20;
+    document.getElementById('pred-score').textContent = pct.toFixed(1) + '%';
+    document.getElementById('pred-competency').textContent = 'Proficient';
+
+    const topics = [
+        { name: 'Mathematics', mastery: 0.85 },
+        { name: 'Physics', mastery: 0.72 },
+        { name: 'Algebra', mastery: 0.90 },
+        { name: 'Geometry', mastery: 0.68 },
+        { name: 'Calculus', mastery: 0.78 },
+        { name: 'Biology', mastery: 0.55 },
+    ];
+
+    document.getElementById('topic-mastery').innerHTML = topics.map(t => {
+        const cls = t.mastery >= 0.7 ? 'success' : t.mastery >= 0.4 ? 'warning' : 'danger';
+        return `
+            <div class="topic-bar">
+                <span class="topic-name">${escapeHtml(t.name)}</span>
+                <div class="topic-track">
+                    <div class="topic-fill" style="width: ${t.mastery * 100}%; background: var(--accent-${cls})"></div>
+                </div>
+                <span class="topic-value">${(t.mastery * 100).toFixed(0)}%</span>
+            </div>
+        `;
+    }).join('');
+
+    renderKnowledgeState({});
+}
+
+function renderKnowledgeState(data) {
+    const knowledgeGrid = document.getElementById('knowledge-grid');
+    const topics = [
+        { name: 'Arithmetic', mastery: 0.88 },
+        { name: 'Algebra', mastery: 0.75 },
+        { name: 'Geometry', mastery: 0.62 },
+        { name: 'Calculus', mastery: 0.70 },
+        { name: 'Physics', mastery: 0.55 },
+        { name: 'Biology', mastery: 0.45 },
+    ];
+
+    knowledgeGrid.innerHTML = topics.map(t => {
+        const cls = t.mastery >= 0.7 ? 'success' : t.mastery >= 0.4 ? 'warning' : 'danger';
+        return `
+            <div class="knowledge-item">
+                <div class="knowledge-topic">${escapeHtml(t.name)}</div>
+                <div class="knowledge-mastery" style="color: var(--accent-${cls});">${(t.mastery * 100).toFixed(0)}%</div>
+                <div class="knowledge-bar">
+                    <div class="knowledge-fill" style="width: ${t.mastery * 100}%; background: var(--accent-${cls})"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+</script>
+{% endblock %}

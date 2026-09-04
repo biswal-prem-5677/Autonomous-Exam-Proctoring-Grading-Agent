@@ -1,0 +1,556 @@
+{% extends "base.html" %}
+
+{% block title %}Model Training — Exam Intelligence Agent{% endblock %}
+
+{% block styles %}
+<style>
+    .training-header {
+        margin-bottom: 24px;
+    }
+
+    .training-header h1 {
+        font-size: 1.75rem;
+        margin-bottom: 8px;
+    }
+
+    .training-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .training-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 24px;
+    }
+
+    .training-card h3 {
+        margin-bottom: 16px;
+        font-size: 1.125rem;
+    }
+
+    .training-card p {
+        color: var(--text-secondary);
+        font-size: 0.9375rem;
+        margin-bottom: 20px;
+        line-height: 1.6;
+    }
+
+    .params-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+
+    .param-group {
+        flex: 1;
+    }
+
+    .param-group label {
+        display: block;
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+        font-weight: 500;
+    }
+
+    .param-group input, .param-group select {
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+    }
+
+    .result-section {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        margin-bottom: 16px;
+        overflow: hidden;
+    }
+
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .result-header h4 {
+        font-size: 1rem;
+    }
+
+    .result-body {
+        padding: 24px;
+    }
+
+    .metric-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .metric-row:last-child {
+        border-bottom: none;
+    }
+
+    .metric-name {
+        font-size: 0.9375rem;
+        color: var(--text-secondary);
+    }
+
+    .metric-value {
+        font-family: var(--font-mono);
+        font-weight: 600;
+    }
+
+    .metric-value.good { color: var(--accent-success); }
+    .metric-value.ok { color: var(--accent-warning); }
+    .metric-value.bad { color: var(--accent-danger); }
+
+    .ablation-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .ablation-table th, .ablation-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .ablation-table th {
+        background: var(--bg-tertiary);
+        font-weight: 600;
+        font-size: 0.8125rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+    }
+
+    .ablation-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .confusion-matrix {
+        display: grid;
+        grid-template-columns: repeat(3, 80px);
+        gap: 2px;
+        margin: 12px auto;
+        width: fit-content;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+    }
+
+    .confusion-header {
+        background: var(--bg-tertiary);
+        padding: 8px;
+        text-align: center;
+        font-weight: 600;
+    }
+
+    .confusion-cell {
+        padding: 12px;
+        text-align: center;
+        border-radius: var(--radius-sm);
+    }
+
+    .confusion-tp { background: rgba(52, 211, 153, 0.2); color: var(--accent-success); }
+    .confusion-tn { background: rgba(52, 211, 153, 0.2); color: var(--accent-success); }
+    .confusion-fp { background: rgba(248, 113, 113, 0.2); color: var(--accent-danger); }
+    .confusion-fn { background: rgba(251, 191, 36, 0.2); color: var(--accent-warning); }
+
+    .code-block {
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 16px;
+        overflow-x: auto;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        color: var(--text-secondary);
+    }
+
+    .training-log {
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 16px;
+        max-height: 300px;
+        overflow-y: auto;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        line-height: 1.8;
+    }
+
+    .log-line {
+        display: flex;
+        gap: 12px;
+    }
+
+    .log-time {
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+
+    .log-msg.info { color: var(--accent-info); }
+    .log-msg.success { color: var(--accent-success); }
+    .log-msg.warning { color: var(--accent-warning); }
+    .log-msg.error { color: var(--accent-danger); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="training-header">
+    <h1>Model Training & Evaluation</h1>
+    <p class="text-secondary">Train and evaluate machine learning models for cheating risk prediction using locally generated training data.</p>
+</div>
+
+<div class="training-grid">
+    <!-- Data Generation -->
+    <div class="training-card">
+        <h3>1. Generate Training Data</h3>
+        <p>
+            Generate synthetic behavioral data for training. Uses realistic proctoring scenarios
+            including normal behavior and various suspicious patterns.
+        </p>
+        <div class="params-row">
+            <div class="param-group">
+                <label>Normal Samples</label>
+                <input type="number" id="param-normal" value="200" min="10" max="1000">
+            </div>
+            <div class="param-group">
+                <label>Suspicious Samples</label>
+                <input type="number" id="param-suspicious" value="100" min="10" max="500">
+            </div>
+        </div>
+        <button class="btn btn-primary w-full" id="btn-generate-data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Generate Dataset
+        </button>
+    </div>
+
+    <!-- Model Training -->
+    <div class="training-card">
+        <h3>2. Train Models</h3>
+        <p>
+            Train Logistic Regression (supervised) and Anomaly Detection (unsupervised) models
+            on the generated dataset. 70/30 train/test split.
+        </p>
+        <div class="params-row">
+            <div class="param-group">
+                <label>Learning Rate</label>
+                <input type="number" id="param-lr" value="0.01" step="0.001">
+            </div>
+            <div class="param-group">
+                <label>Regularization</label>
+                <input type="number" id="param-reg" value="0.1" step="0.1">
+            </div>
+        </div>
+        <button class="btn btn-primary w-full" id="btn-train">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Train All Models
+        </button>
+    </div>
+
+    <!-- Ablation Study -->
+    <div class="training-card">
+        <h3>3. Ablation Study</h3>
+        <p>
+            Compare model performance with different feature subsets to identify
+            the most predictive signal modalities.
+        </p>
+        <div class="params-row">
+            <div class="param-group">
+                <label>Normal Samples</label>
+                <input type="number" id="ablation-normal" value="200" min="10" max="1000">
+            </div>
+            <div class="param-group">
+                <label>Suspicious Samples</label>
+                <input type="number" id="ablation-suspicious" value="100" min="10" max="500">
+            </div>
+        </div>
+        <button class="btn btn-secondary w-full" id="btn-ablation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Run Ablation Study
+        </button>
+    </div>
+
+    <!-- Feature Importance -->
+    <div class="training-card">
+        <h3>4. Feature Importance</h3>
+        <p>
+            View feature weights from the trained logistic regression model
+            to understand which behavioral signals contribute most to risk prediction.
+        </p>
+        <div id="feature-importance">
+            <p class="text-muted" style="font-size: 0.875rem;">Train models first to see feature importance.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section -->
+<div id="training-results">
+    <!-- Logistic Regression Results -->
+    <div class="result-section hidden" id="lr-results">
+        <div class="result-header">
+            <h4>Logistic Regression Results</h4>
+            <span class="badge badge-success" id="lr-accuracy">—</span>
+        </div>
+        <div class="result-body">
+            <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">Performance Metrics</h5>
+                    <div id="lr-metrics"></div>
+                </div>
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">Confusion Matrix</h5>
+                    <div id="lr-confusion"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anomaly Detection Results -->
+    <div class="result-section hidden" id="anomaly-results">
+        <div class="result-header">
+            <h4>Anomaly Detection Results (Mahalanobis)</h4>
+            <span class="badge badge-info" id="anomaly-accuracy">—</span>
+        </div>
+        <div class="result-body">
+            <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">Performance Metrics</h5>
+                    <div id="anomaly-metrics"></div>
+                </div>
+                <div>
+                    <h5 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">Confusion Matrix</h5>
+                    <div id="anomaly-confusion"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ablation Results -->
+    <div class="result-section hidden" id="ablation-results">
+        <div class="result-header">
+            <h4>Ablation Study Results</h4>
+        </div>
+        <div class="result-body">
+            <div style="overflow-x: auto;">
+                <table class="ablation-table" id="ablation-table">
+                    <thead>
+                        <tr>
+                            <th>Feature Set</th>
+                            <th>Accuracy</th>
+                            <th>Precision</th>
+                            <th>Recall</th>
+                            <th>F1 Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ablation-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="training-log hidden" id="training-log">
+    <div class="log-line"><span class="log-time">[system]</span><span class="log-msg info">Training console ready.</span></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('btn-generate-data').addEventListener('click', generateData);
+    document.getElementById('btn-train').addEventListener('click', trainModels);
+    document.getElementById('btn-ablation').addEventListener('click', runAblation);
+});
+
+function log(msg, type = 'info') {
+    const logEl = document.getElementById('training-log');
+    logEl.classList.remove('hidden');
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="log-time">[${time}]</span><span class="log-msg ${type}">${msg}</span>`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderMetricRow(name, value, type = '') {
+    const cls = value >= 0.9 ? 'good' : value >= 0.7 ? 'ok' : value > 0 ? 'bad' : '';
+    return `<div class="metric-row"><span class="metric-name">${name}</span><span class="metric-value ${cls}">${typeof value === 'number' ? value.toFixed(4) : value}</span></div>`;
+}
+
+function renderConfusionMatrix(cm) {
+    if (!cm) return '<div class="text-muted">No data</div>';
+    const tp = cm[1]?.[1] || 0;
+    const tn = cm[0]?.[0] || 0;
+    const fp = cm[0]?.[1] || 0;
+    const fn = cm[1]?.[0] || 0;
+    return `
+        <div class="confusion-matrix">
+            <div></div><div class="confusion-header">Pred +</div><div class="confusion-header">Pred -</div>
+            <div class="confusion-header">Act +</div><div class="confusion-cell confusion-tp">${tp}</div><div class="confusion-cell confusion-fn">${fn}</div>
+            <div class="confusion-header">Act -</div><div class="confusion-cell confusion-fp">${fp}</div><div class="confusion-cell confusion-tn">${tn}</div>
+        </div>
+    `;
+}
+
+async function generateData() {
+    const nNormal = parseInt(document.getElementById('param-normal').value);
+    const nSuspicious = parseInt(document.getElementById('param-suspicious').value);
+
+    log(`Generating ${nNormal} normal + ${nSuspicious} suspicious samples...`, 'info');
+    const btn = document.getElementById('btn-generate-data');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;"></span> Generating...';
+
+    try {
+        const result = await API.generateTrainingData({ n_normal: nNormal, n_suspicious: nSuspicious });
+        log(`Dataset ready: ${result.total_samples} samples, ${result.feature_count} features`, 'success');
+        log(`  Normal: ${result.class_distribution.normal}, Suspicious: ${result.class_distribution.suspicious}`, 'info');
+        log(`  Features: ${result.feature_names.slice(0, 5).join(', ')}...`, 'info');
+        showToast(`Generated ${result.total_samples} samples`, 'success');
+    } catch (e) {
+        log(`Error: ${e.message}`, 'error');
+        showToast('Failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> Generate Dataset`;
+    }
+}
+
+async function trainModels() {
+    const nNormal = parseInt(document.getElementById('param-normal').value);
+    const nSuspicious = parseInt(document.getElementById('param-suspicious').value);
+    const lr = parseFloat(document.getElementById('param-lr').value);
+    const reg = parseFloat(document.getElementById('param-reg').value);
+
+    log(`Training models (lr=${lr}, reg=${reg}, n=${nNormal+nSuspicious})...`, 'info');
+    const btn = document.getElementById('btn-train');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;"></span> Training...';
+
+    try {
+        const result = await API.trainModels({ n_normal: nNormal, n_suspicious: nSuspicious });
+
+        // Logistic Regression
+        const lrMetrics = result.logistic_regression.metrics;
+        document.getElementById('lr-results').classList.remove('hidden');
+        document.getElementById('lr-accuracy').textContent = `Accuracy: ${(lrMetrics.accuracy * 100).toFixed(1)}%`;
+        document.getElementById('lr-metrics').innerHTML =
+            renderMetricRow('Accuracy', lrMetrics.accuracy) +
+            renderMetricRow('Precision', lrMetrics.precision) +
+            renderMetricRow('Recall', lrMetrics.recall) +
+            renderMetricRow('F1 Score', lrMetrics.f1) +
+            renderMetricRow('AUC-ROC', lrMetrics.auc_roc);
+        document.getElementById('lr-confusion').innerHTML = renderConfusionMatrix(lrMetrics.confusion_matrix);
+        log(`Logistic Regression: Acc=${(lrMetrics.accuracy*100).toFixed(1)}%, F1=${(lrMetrics.f1*100).toFixed(1)}%`, 'success');
+
+        // Feature importance
+        const weights = result.logistic_regression.feature_weights;
+        const featDiv = document.getElementById('feature-importance');
+        const sorted = Object.entries(weights).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+        featDiv.innerHTML = sorted.slice(0, 8).map(([name, w]) => {
+            const max = Math.max(...Object.values(weights).map(Math.abs));
+            const pct = (Math.abs(w) / max * 100);
+            const color = w > 0 ? 'danger' : 'success';
+            return `
+                <div class="signal-bar">
+                    <span class="signal-label" style="font-size: 0.75rem;">${escapeHtml(name.replace('_', ' '))}</span>
+                    <div class="signal-track">
+                        <div class="signal-fill" style="width: ${pct}%; background: var(--accent-${color})"></div>
+                    </div>
+                    <span class="signal-value" style="font-size: 0.75rem;">${w.toFixed(3)}</span>
+                </div>
+            `;
+        }).join('');
+
+        // Anomaly Detection
+        const anomMetrics = result.anomaly_detection.metrics;
+        document.getElementById('anomaly-results').classList.remove('hidden');
+        document.getElementById('anomaly-accuracy').textContent = `Accuracy: ${(anomMetrics.accuracy * 100).toFixed(1)}%`;
+        document.getElementById('anomaly-metrics').innerHTML =
+            renderMetricRow('Accuracy', anomMetrics.accuracy) +
+            renderMetricRow('Precision', anomMetrics.precision) +
+            renderMetricRow('Recall', anomMetrics.recall) +
+            renderMetricRow('F1 Score', anomMetrics.f1) +
+            renderMetricRow('Threshold', result.anomaly_detection.threshold);
+        document.getElementById('anomaly-confusion').innerHTML = renderConfusionMatrix(anomMetrics.confusion_matrix);
+        log(`Anomaly Detection: Acc=${(anomMetrics.accuracy*100).toFixed(1)}%, Threshold=${result.anomaly_detection.threshold}`, 'success');
+
+        showToast('Models trained successfully!', 'success');
+    } catch (e) {
+        log(`Error: ${e.message}`, 'error');
+        showToast('Training failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="5 3 19 12 5 21 5 3"/></svg> Train All Models`;
+    }
+}
+
+async function runAblation() {
+    const nNormal = parseInt(document.getElementById('ablation-normal').value);
+    const nSuspicious = parseInt(document.getElementById('ablation-suspicious').value);
+
+    log(`Running ablation study (n=${nNormal+nSuspicious})...`, 'info');
+    const btn = document.getElementById('btn-ablation');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;"></span> Running...';
+
+    try {
+        const result = await API.runEvaluation({ n_normal: nNormal, n_suspicious: nSuspicious });
+
+        const tbody = document.getElementById('ablation-body');
+        tbody.innerHTML = '';
+        document.getElementById('ablation-results').classList.remove('hidden');
+
+        const configs = [
+            { key: 'full_multimodal', label: 'Full Multimodal (20 features)' },
+            { key: 'vision_only', label: 'Vision Only (5 features)' },
+            { key: 'vision_keyboard', label: 'Vision + Keyboard (10 features)' },
+            { key: 'vision_keyboard_mouse', label: '+ Mouse (14 features)' },
+            { key: 'vision_keyboard_mouse_browser', label: '+ Browser (20 features)' },
+        ];
+
+        configs.forEach(cfg => {
+            const m = result.ablation_results[cfg.key];
+            if (!m) return;
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td style="font-weight: 500;">${cfg.label}</td>
+                <td style="font-family: var(--font-mono); color: var(--accent-primary);">${(m.accuracy * 100).toFixed(1)}%</td>
+                <td style="font-family: var(--font-mono);">${(m.precision * 100).toFixed(1)}%</td>
+                <td style="font-family: var(--font-mono);">${(m.recall * 100).toFixed(1)}%</td>
+                <td style="font-family: var(--font-mono);">${(m.f1 * 100).toFixed(1)}%</td>
+            `;
+            tbody.appendChild(row);
+        });
+
+        log('Ablation study complete. Results displayed below.', 'success');
+        showToast('Ablation study completed', 'success');
+    } catch (e) {
+        log(`Error: ${e.message}`, 'error');
+        showToast('Ablation failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> Run Ablation Study`;
+    }
+}
+</script>
+{% endblock %}
