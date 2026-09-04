@@ -7,6 +7,9 @@ from src.grading.numerical import NumericalGrader
 from src.grading.tfidf import TFIDFScorer, KeywordCoverageScorer
 
 
+from src.grading.long_answer import LongAnswerGrader
+
+
 class GradingOrchestrator:
     """Routes each question to its appropriate grader and aggregates results."""
 
@@ -15,25 +18,25 @@ class GradingOrchestrator:
         self.numerical_grader = NumericalGrader(default_tolerance=0.02)
         self.tfidf_scorer = TFIDFScorer()
         self.keyword_scorer = KeywordCoverageScorer(partial_threshold=0.6)
+        self.long_answer_grader = LongAnswerGrader()
 
     def grade_all(self, questions: List[Question],
                   answers: Dict[str, Any],
                   reference_answers: Dict[str, str] = None) -> Dict[str, Any]:
         """Grade all answers across all question types.
 
-        Args:
-            questions: List of all questions
-            answers: Dict mapping question_id -> student answer
-            reference_answers: Reference answers for short-answer TF-IDF (optional)
-
-        Returns:
-            Aggregated grading results
+        Routes to:
+        - MCQ / True-False → exact match
+        - Numerical → tolerance-based
+        - Short Answer → TF-IDF + keyword coverage
+        - Long/Descriptive Answer → multi-signal (semantic + keyword + structure + coverage)
         """
         mcq_results = self.grade_mcq(questions, answers)
         numerical_results = self.grade_numerical(questions, answers)
         short_answer_results = self.grade_short_answer(questions, answers, reference_answers)
+        long_answer_results = self.grade_long_answer(questions, answers, reference_answers)
 
-        return self._aggregate([mcq_results, numerical_results, short_answer_results])
+        return self._aggregate([mcq_results, numerical_results, short_answer_results, long_answer_results])
 
     def grade_mcq(self, questions: List[Question],
                   answers: Dict[str, Any]) -> Dict[str, Any]:
@@ -102,6 +105,56 @@ class GradingOrchestrator:
             }
             total_score += score
             total_max += q.marks
+
+        return {
+            "per_question": per_question,
+            "total_score": total_score,
+            "total_max": total_max,
+            "percentage": (total_score / total_max * 100) if total_max > 0 else 0.0,
+        }
+
+    def grade_long_answer(self, questions: List[Question],
+                          answers: Dict[str, Any],
+                          reference_answers: Dict[str, str] = None) -> Dict[str, Any]:
+        """Grade long/descriptive answer questions using multi-signal scoring.
+
+        Score = w1 * S_semantic + w2 * S_keyword + w3 * S_structure + w4 * S_coverage
+        """
+        long_qs = [q for q in questions if q.type == QuestionType.LONG_ANSWER]
+        if not long_qs:
+            return {"per_question": {}, "total_score": 0.0, "total_max": 0.0, "percentage": 0.0}
+
+        per_question = {}
+        total_score = 0.0
+        total_max = 0.0
+
+        for q in long_qs:
+            student_ans = answers.get(q.id, "")
+            if isinstance(student_ans, dict):
+                student_ans = student_ans.get("answer", "")
+            student_str = str(student_ans)
+
+            ref_answer = reference_answers.get(q.id, q.text) if reference_answers else q.text
+
+            result = self.long_answer_grader.grade(
+                student_answer=student_str,
+                reference_answer=ref_answer,
+                keywords=q.keywords or [],
+                marks=q.marks,
+                question_text=q.text,
+            )
+
+            per_question[q.id] = {
+                "score": round(result.final_score, 4),
+                "max_score": result.max_score,
+                "semantic_similarity": round(result.semantic_score, 4),
+                "keyword_coverage": round(result.keyword_score, 4),
+                "structure_score": round(result.structure_score, 4),
+                "coverage_score": round(result.coverage_score, 4),
+                "details": result.details,
+            }
+            total_score += result.final_score
+            total_max += result.max_score
 
         return {
             "per_question": per_question,

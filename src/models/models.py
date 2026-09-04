@@ -10,6 +10,7 @@ class QuestionType(Enum):
     MCQ = "mcq"
     NUMERICAL = "numerical"
     SHORT_ANSWER = "short_answer"
+    LONG_ANSWER = "long_answer"
     TRUE_FALSE = "true_false"
 
 

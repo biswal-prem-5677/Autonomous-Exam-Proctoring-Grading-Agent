@@ -20,6 +20,7 @@ data/*.db
 data/*.log
 data/processed/
 models/*.pkl
+models/*.json
 
 # IDE
 .vscode/
