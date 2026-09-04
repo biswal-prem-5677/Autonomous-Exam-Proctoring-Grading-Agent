@@ -457,14 +457,13 @@ def grade_single_question():
     elif qtype == "numerical":
         result = grader.numerical_grader.grade(q, student_answer)
     elif qtype == "short_answer":
-        tfidf = grader.tfidf_scorer.compute_tfidf(reference_answer, student_answer)
-        sim = grader.tfidf_scorer.cosine_similarity(tfidf, reference_answer, student_answer)
+        tfidf = grader.tfidf_scorer.cosine_similarity(reference_answer, student_answer)
         kw = grader.keyword_scorer.score(reference_answer, student_answer, keywords)
-        score = 0.5 * sim + 0.5 * kw["coverage"]
+        score = 0.5 * tfidf + 0.5 * kw["coverage"]
         result = {
             "score": round(score * marks, 2),
             "max_score": marks,
-            "similarity": round(sim, 4),
+            "similarity": round(tfidf, 4),
             "keyword_coverage": round(kw["coverage"], 4),
             "keywords_found": kw["found"],
             "keywords_missing": kw["missing"],
@@ -793,26 +792,37 @@ def generate_examiner_report():
 def predict_performance():
     data = request.get_json(force=True)
     session_key = data.get("session_key")
-    features = data.get("features", {})
+    features_list = data.get("features", [])
 
     if not session_key:
         return jsonify({"error": "session_key required"}), 400
+
+    # Convert list to numpy array for prediction
+    import numpy as np
+    features = np.array(features_list) if features_list else np.array([])
 
     predictor = _performance_predictors.get(session_key)
     if not predictor:
         predictor = PerformancePredictor()
         _performance_predictors[session_key] = predictor
 
-    result = predictor.predict(features)
-    return jsonify(result)
+    # If we have features but no model trained, return a placeholder
+    if features.size > 0 and not hasattr(predictor, '_fitted'):
+        return jsonify({"error": "Model not trained. Provide training data first."}), 400
+
+    if features.size > 0:
+        result = predictor.predict(features)
+        return jsonify({"prediction": result.tolist() if hasattr(result, 'tolist') else result})
+    return jsonify({})
 
 
 @app.route("/api/predict/difficulty", methods=["POST"])
 def estimate_difficulty():
     data = request.get_json(force=True)
     session_key = data.get("session_key")
-    correct_rates = data.get("correct_rates", {})
-    time_rates = data.get("time_rates", {})
+    question_id = data.get("question_id", "unknown")
+    correct_count = data.get("correct_count", 0)
+    total_count = data.get("total_count", 1)
 
     if not session_key:
         return jsonify({"error": "session_key required"}), 400
@@ -822,11 +832,14 @@ def estimate_difficulty():
         estimator = DifficultyEstimator()
         _difficulty_estimators[session_key] = estimator
 
-    if correct_rates:
-        estimator.observe(correct_rates, time_rates)
+    difficulty = estimator.estimate_from_responses(question_id, correct_count, total_count)
 
-    result = estimator.get_estimates()
-    return jsonify(result)
+    return jsonify({
+        "question_id": question_id,
+        "difficulty": round(difficulty, 4),
+        "correct_count": correct_count,
+        "total_count": total_count,
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -841,21 +854,30 @@ def generate_training_data():
     scenarios = data.get("scenarios")
 
     gen = TrainingDataGenerator(seed=42)
-    dataset = gen.generate_dataset(
+    X, y = gen.generate_dataset(
         n_normal=n_normal,
         n_suspicious=n_suspicious,
-        scenarios=scenarios,
     )
 
+    # Define feature names (22 features as per training_data.py)
+    feature_names = [
+        "face_present", "face_confidence", "face_count", "absence_ratio",
+        "head_yaw", "head_pitch", "head_roll",
+        "audio_rms", "audio_db", "audio_zcr", "audio_threshold_flag", "spectral_centroid",
+        "keyboard_idle_flag", "keystroke_rate", "key_hold_mean", "key_latency_mean",
+        "mouse_speed", "mouse_distance", "click_rate", "mouse_idle_flag",
+        "multi_face_events", "session_progress"
+    ]
+
     return jsonify({
-        "total_samples": len(dataset["X"]),
-        "feature_count": len(dataset["feature_names"]),
-        "feature_names": dataset["feature_names"],
+        "total_samples": len(X),
+        "feature_count": len(feature_names),
+        "feature_names": feature_names,
         "class_distribution": {
-            "normal": int(sum(1 for l in dataset["y"] if l == 0)),
-            "suspicious": int(sum(1 for l in dataset["y"] if l == 1)),
+            "normal": int(sum(1 for l in y if l == 0)),
+            "suspicious": int(sum(1 for l in y if l == 1)),
         },
-        "sample_preview": dataset["X"][:5].tolist() if hasattr(dataset["X"], "tolist") else dataset["X"][:5],
+        "sample_preview": X[:5].tolist() if hasattr(X, "tolist") else X[:5],
     })
 
 
@@ -867,11 +889,16 @@ def train_models():
     n_suspicious = data.get("n_suspicious", 100)
 
     gen = TrainingDataGenerator(seed=42)
-    dataset = gen.generate_dataset(n_normal=n_normal, n_suspicious=n_suspicious)
+    X, y = gen.generate_dataset(n_normal=n_normal, n_suspicious=n_suspicious)
 
-    X = dataset["X"]
-    y = dataset["y"]
-    feature_names = dataset["feature_names"]
+    feature_names = [
+        "face_present", "face_confidence", "face_count", "absence_ratio",
+        "head_yaw", "head_pitch", "head_roll",
+        "audio_rms", "audio_db", "audio_zcr", "audio_threshold_flag", "spectral_centroid",
+        "keyboard_idle_flag", "keystroke_rate", "key_hold_mean", "key_latency_mean",
+        "mouse_speed", "mouse_distance", "click_rate", "mouse_idle_flag",
+        "multi_face_events", "session_progress"
+    ]
 
     # Train/test split (70/30)
     n = len(X)
@@ -895,7 +922,7 @@ def train_models():
     lr.fit(X_train, y_train)
 
     # Anomaly Detector
-    anomaly = AnomalyDetector(method="mahalanobis")
+    anomaly = AnomalyDetector(mahalanobis_confidence=0.95)
     anomaly.fit(X_train[y_train == 0])  # Fit on normal class only
 
     # Evaluate
@@ -940,11 +967,16 @@ def run_evaluation():
     run_ablation = data.get("run_ablation", True)
 
     gen = TrainingDataGenerator(seed=42)
-    dataset = gen.generate_dataset(n_normal=n_normal, n_suspicious=n_suspicious)
+    X, y = gen.generate_dataset(n_normal=n_normal, n_suspicious=n_suspicious)
 
-    X = dataset["X"]
-    y = dataset["y"]
-    feature_names = dataset["feature_names"]
+    feature_names = [
+        "face_present", "face_confidence", "face_count", "absence_ratio",
+        "head_yaw", "head_pitch", "head_roll",
+        "audio_rms", "audio_db", "audio_zcr", "audio_threshold_flag", "spectral_centroid",
+        "keyboard_idle_flag", "keystroke_rate", "key_hold_mean", "key_latency_mean",
+        "mouse_speed", "mouse_distance", "click_rate", "mouse_idle_flag",
+        "multi_face_events", "session_progress"
+    ]
 
     n = len(X)
     split = int(0.7 * n)
