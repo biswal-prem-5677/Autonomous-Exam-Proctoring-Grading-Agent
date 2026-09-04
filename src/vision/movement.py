@@ -40,7 +40,7 @@ UPPER_BODY_POINTS = [LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_WRIST, RIGHT_WRIST]
 class MovementDetector:
     """Detects unusual body movement from pose landmarks."""
 
-    def __init__(self, threshold_standing: float = 0.15,
+    def __init__(self, threshold_standing: float = 2.0,
                  threshold_excessive: float = 80.0,
                  history_window: int = 60):
         """Initialize movement detector.
@@ -91,12 +91,12 @@ class MovementDetector:
         displacement = self._compute_displacement(torso_center)
 
         result = {
-            "movement_detected": displacement > 5.0,
+            "movement_detected": bool(displacement > 5.0),
             "displacement": round(displacement, 2),
-            "posture": posture,
-            "posture_changed": posture_changed,
-            "excessive_movement": displacement > self.threshold_excessive,
-            "standing": standing,
+            "posture": str(posture),
+            "posture_changed": bool(posture_changed),
+            "excessive_movement": bool(displacement > self.threshold_excessive),
+            "standing": bool(standing),
             "torso_center": torso_center.tolist(),
         }
 
@@ -205,7 +205,9 @@ class MovementDetector:
 
         hip_y = (lh[1] + rh[1]) / 2
         shoulder_y = (ls[1] + rs[1]) / 2
-        torso_height = shoulder_y - hip_y
+        # In image coords, shoulder_y < hip_y (shoulders are above hips).
+        # Use abs so the magnitude works as torso height regardless of orientation.
+        torso_height = abs(shoulder_y - hip_y)
 
         ratio = torso_height / shoulder_width
         standing = ratio > self.threshold_standing
