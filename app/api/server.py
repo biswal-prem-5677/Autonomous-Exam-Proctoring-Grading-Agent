@@ -884,6 +884,8 @@ def generate_training_data():
 @app.route("/api/train/models", methods=["POST"])
 def train_models():
     """Train logistic regression and anomaly models."""
+    import numpy as np
+    import random
     data = request.get_json(force=True) or {}
     n_normal = data.get("n_normal", 200)
     n_suspicious = data.get("n_suspicious", 100)
@@ -1088,7 +1090,9 @@ def demo_setup():
     ]
 
     for sq in sample_questions:
-        exam.add_question(**sq)
+        qtype = sq.pop("type", "mcq")
+        text = sq.pop("text", "")
+        exam.add_question(qtype=qtype, text=text, **sq)
 
     # Create sample students
     students = data.get("students") or [

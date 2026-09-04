@@ -159,6 +159,10 @@ class KnowledgeTracer:
         """Get current mastery level for a topic."""
         return self._knowledge.get(topic, self.initial_mastery)
 
+    def get_all_mastery(self) -> Dict[str, float]:
+        """Get mastery levels for all tracked topics."""
+        return dict(self._knowledge)
+
     def get_weak_topics(self, threshold: float = 0.4) -> List[str]:
         """Return topics below mastery threshold."""
         return [t for t, m in self._knowledge.items() if m < threshold]

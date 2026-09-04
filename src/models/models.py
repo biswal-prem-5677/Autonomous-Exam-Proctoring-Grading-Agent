@@ -70,9 +70,18 @@ class Exam:
 
     def add_question(self, qtype: str, text: str, **kwargs):
         """Add a question to the exam."""
+        # Extract fields that belong on Exam, not Question
+        meta = kwargs.pop("metadata", {})
+        for key in ("topic", "difficulty"):
+            if key in kwargs:
+                meta[key] = kwargs.pop(key)
+        if kwargs.get("reference_answer"):
+            meta["reference_answer"] = kwargs.pop("reference_answer")
+        if meta:
+            kwargs["metadata"] = meta
         q = Question(
-            question_id=f"q{len(self.questions) + 1}",
-            question_type=QuestionType(qtype),
+            id=f"q{len(self.questions) + 1}",
+            type=QuestionType(qtype),
             text=text,
             **kwargs
         )
