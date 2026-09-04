@@ -1,0 +1,61 @@
+# Application config
+app:
+  name: "Autonomous Exam Proctoring & Grading Agent"
+  version: "1.0.0"
+
+# Exam settings
+exam:
+  default_duration_minutes: 60
+  max_students: 200
+  question_types: [mcq, numerical, short_answer, true_false]
+  auto_submit: true
+  warn_before_minutes: 5
+
+# Proctoring thresholds
+proctoring:
+  face_confidence_threshold: 0.7
+  max_face_absence_seconds: 10
+  head_turn_threshold_degrees: 45
+  gaze_threshold_degrees: 30
+  max_multiple_faces: 1
+  audio_threshold_db: -40
+  keyboard_idle_seconds: 120
+  mouse_idle_seconds: 120
+
+# Risk scoring
+risk:
+  alpha_decay: 0.8          # Risk decay factor: R_t = alpha * R_{t-1} + (1-alpha) * E_t
+  escalation_threshold: 0.7
+  review_threshold: 0.5
+  evidence_window_seconds: 300
+  multi_signal_required: 2   # Independent signals needed before escalation
+
+# Grading settings
+grading:
+  mcq_weight: 1.0
+  numerical_tolerance: 0.02  # 2% tolerance
+  tfidf_min_similarity: 0.4
+  keyword_coverage_threshold: 0.6
+  max_short_answer_length: 500
+
+# ML model settings
+ml:
+  logistic:
+    learning_rate: 0.01
+    max_iterations: 1000
+    regularization: 0.1
+  anomaly:
+    zscore_threshold: 2.5
+    mahalanobis_confidence: 0.95
+  regression:
+    n_estimators: 100
+    max_depth: 10
+
+# Database
+database:
+  path: "data/exam_agent.db"
+
+# Logging
+logging:
+  level: "INFO"
+  file: "data/agent.log"
