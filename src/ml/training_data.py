@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Training Data Generator for the Autonomous Exam Proctoring Agent.
 
@@ -330,7 +331,7 @@ class TrainingDataGenerator:
     # ─── Private Generation Methods ──────────────────────────────��──────────
 
     def _generate_normal_batch(
-        self, n: int, noise: float
+        self, n: int, noise_std: float
     ) -> np.ndarray:
         """Generate normal behavior feature vectors."""
         p = self.normal_profile

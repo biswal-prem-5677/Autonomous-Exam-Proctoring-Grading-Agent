@@ -198,6 +198,69 @@ def cmd_test(args):
     sys.exit(result.returncode)
 
 
+def cmd_train(args):
+    """Train ML models on generated behavioral data."""
+    from src.ml.pipeline import run_full_pipeline
+
+    print("=" * 60)
+    print("  ML MODEL TRAINING")
+    print("=" * 60)
+    results = run_full_pipeline(
+        n_normal=args.n_normal,
+        n_suspicious=args.n_suspicious,
+        model_dir=args.output_dir,
+    )
+    print("=" * 60)
+    print("RESULTS SUMMARY")
+    print(f"  Optimal threshold : {results.optimal_threshold:.3f}")
+    print(f"  Logistic accuracy : {results.logistic_metrics['accuracy']:.3f}")
+    print(f"  Logistic F1       : {results.logistic_metrics['f1']:.3f}")
+    print(f"  Logistic ROC-AUC  : {results.logistic_metrics['roc_auc']:.3f}")
+    print(f"  Anomaly accuracy  : {results.anomaly_metrics['accuracy']:.3f}")
+    print(f"  Anomaly F1        : {results.anomaly_metrics['f1']:.3f}")
+    print(f"  Precision         : {results.threshold_metrics.get('precision', 0):.3f}")
+    print(f"  Recall            : {results.threshold_metrics.get('recall', 0):.3f}")
+    print("=" * 60)
+
+
+def cmd_eval(args):
+    """Run evaluation: ablation study and metrics."""
+    from src.ml.pipeline import TrainingPipeline, TrainingConfig
+    from src.ml.calibration import ModelEvaluator
+    from src.ml.training_data import TrainingDataGenerator
+
+    print("=" * 60)
+    print("  MODEL EVALUATION & ABLATION STUDY")
+    print("=" * 60)
+
+    gen = TrainingDataGenerator(seed=42)
+    X, y = gen.generate_dataset(n_normal=500, n_suspicious=500)
+    X_train, X_test, y_train, y_test = gen.train_test_split(X, y, test_ratio=0.2)
+
+    config = TrainingConfig(n_normal=500, n_suspicious=500)
+    pipeline = TrainingPipeline(config)
+    pipeline.X_train, pipeline.X_test = X_train, X_test
+    pipeline.y_train, pipeline.y_test = y_train, y_test
+    pipeline.logistic_model.fit(X_train, y_train)
+    pipeline.anomaly_detector.fit(X_train[y_train == 0])
+
+    y_pred = pipeline.logistic_model.predict(X_test)
+    y_proba = pipeline.logistic_model.predict_proba(X_test)
+    metrics = ModelEvaluator.evaluate_classifier(y_test, y_pred, y_proba)
+
+    print(f"\n  Full Model:")
+    print(f"    Accuracy  : {metrics['accuracy']:.3f}")
+    print(f"    Precision : {metrics['precision']:.3f}")
+    print(f"    Recall    : {metrics['recall']:.3f}")
+    print(f"    F1        : {metrics['f1']:.3f}")
+    print(f"    ROC-AUC   : {metrics['roc_auc']:.3f}")
+    print(f"    Confusion  : TP={metrics['confusion_matrix']['tp']}, "
+          f"FP={metrics['confusion_matrix']['fp']}, "
+          f"TN={metrics['confusion_matrix']['tn']}, "
+          f"FN={metrics['confusion_matrix']['fn']}")
+    print("=" * 60)
+
+
 def _events_to_signals(events: list) -> dict:
     """Convert proctoring event list to signal dict for the agent."""
     signals = {
@@ -246,6 +309,13 @@ def main():
 
     p_test = sub.add_parser("test", help="Run test suite")
 
+    p_train = sub.add_parser("train", help="Train ML models")
+    p_train.add_argument("--n-normal", type=int, default=500, help="Normal samples")
+    p_train.add_argument("--n-suspicious", type=int, default=500, help="Suspicious samples")
+    p_train.add_argument("--output-dir", default="models", help="Model save directory")
+
+    p_eval = sub.add_parser("eval", help="Run model evaluation & ablation")
+
     args = parser.parse_args()
 
     if args.command == "demo":
@@ -254,6 +324,10 @@ def main():
         cmd_grade(args)
     elif args.command == "test":
         cmd_test(args)
+    elif args.command == "train":
+        cmd_train(args)
+    elif args.command == "eval":
+        cmd_eval(args)
     else:
         parser.print_help()
         sys.exit(0)

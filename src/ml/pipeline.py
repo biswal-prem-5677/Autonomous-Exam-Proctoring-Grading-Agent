@@ -182,9 +182,7 @@ class TrainingPipeline:
             name: float(coef)
             for name, coef in zip(feature_names, coefs)
         }
-        ranked = dict(
-            sorted(importance.items(), key=lambda x: abs(x[1]), reverse=True
-        )
+        ranked = dict(sorted(importance.items(), key=lambda x: abs(x[1]), reverse=True))
         return ranked
 
     def save_models(self, model_dir: str) -> None:

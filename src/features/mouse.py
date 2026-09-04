@@ -89,7 +89,7 @@ class MouseDynamics:
 
     IDLE_THRESHOLD_S = 30.0
     VELOCITY_WINDOW_MS = 100
-    MIN_EVENTS_FOR_ANALYSIS = 5
+    MIN_EVENTS_FOR_ANALYSIS = 2
 
     def __init__(self, max_events: int = 2000):
         self._events: deque = deque(maxlen=max_events)
