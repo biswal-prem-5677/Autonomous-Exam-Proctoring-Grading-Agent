@@ -58,6 +58,29 @@ class ProctoringEvent:
 
 
 @dataclass
+class Exam:
+    """Represents an exam with questions."""
+    exam_id: str
+    title: str
+    duration_minutes: int
+    questions: List[Question] = field(default_factory=list)
+    topic: str = ""
+    difficulty: str = "medium"
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def add_question(self, qtype: str, text: str, **kwargs):
+        """Add a question to the exam."""
+        q = Question(
+            question_id=f"q{len(self.questions) + 1}",
+            question_type=QuestionType(qtype),
+            text=text,
+            **kwargs
+        )
+        self.questions.append(q)
+        return q
+
+
+@dataclass
 class ExamSession:
     """Represents an active exam session."""
     session_id: str

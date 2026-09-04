@@ -34,11 +34,11 @@ import sys
 sys.path.insert(0, sys_path)
 
 from src.exam.exam import ExamManager
-from src.exam.session import ExamSession
+from src.exam.session import ExamSessionManager as ExamSession
 from src.agent.controller import ProctoringAgent
 from src.grading.scorer import GradingOrchestrator
-from src.reporting.student_report import StudentReport
-from src.reporting.examiner_report import ExaminerReport
+from src.reports.student_report import StudentReportGenerator as StudentReport
+from src.reports.examiner_report import ExaminerReportGenerator as ExaminerReport
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "page" not in st.session_state:

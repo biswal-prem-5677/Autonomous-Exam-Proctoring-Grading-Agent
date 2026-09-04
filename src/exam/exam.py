@@ -113,3 +113,43 @@ class ExamController:
             "events_count": len(self.session.events),
             "answers_count": len(self.session.answers),
         }
+
+
+class ExamManager:
+    """High-level exam manager for frontend - wraps ExamController for UI convenience."""
+
+    def __init__(self, config: dict = None):
+        self.config = config or {}
+        self._controllers: dict[str, ExamController] = {}
+        self._exams: dict[str, object] = {}
+
+    def get_exam(self, exam_id: str):
+        """Get an exam by ID."""
+        return self._exams.get(exam_id)
+
+    def create_exam(self, exam_id: str, title: str, duration_minutes: int,
+                    questions: list) -> object:
+        """Create a new exam."""
+        from src.models.models import Exam
+        exam = Exam(
+            exam_id=exam_id,
+            title=title,
+            duration_minutes=duration_minutes,
+            questions=questions,
+        )
+        self._exams[exam_id] = exam
+        return exam
+
+    def get_or_create_controller(self, student_id: str, exam_id: str,
+                                  duration_minutes: int = 60) -> ExamController:
+        """Get or create an exam controller for a student."""
+        key = f"{student_id}:{exam_id}"
+        if key not in self._controllers:
+            self._controllers[key] = ExamController(self.config)
+            self._controllers[key].create_session(student_id, exam_id, duration_minutes)
+        return self._controllers[key]
+
+    def get_controller(self, student_id: str, exam_id: str) -> Optional[ExamController]:
+        """Get existing controller for a student."""
+        key = f"{student_id}:{exam_id}"
+        return self._controllers.get(key)
