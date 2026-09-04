@@ -36,7 +36,7 @@ from src.features.behavioral import BehavioralFeatureExtractor
 from src.features.temporal import TemporalFeatureAggregator
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
-from src.ml.calibration import ModelEvaluator, CalibrationCurve
+from src.ml.calibration import ModelCalibrator, ModelEvaluator
 from src.ml.training_data import TrainingDataGenerator
 from src.prediction.performance import PerformancePredictor
 from src.prediction.knowledge import KnowledgeTracer

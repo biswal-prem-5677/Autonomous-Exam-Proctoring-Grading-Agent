@@ -11,9 +11,24 @@ def load_config(config_path: str = None) -> dict:
     load_dotenv()
 
     if config_path is None:
-        config_path = Path(__file__).parent.parent / "config" / "default.yaml"
+        # Try multiple possible locations
+        possible_paths = [
+            Path(__file__).parent.parent / "config" / "default.yaml",
+            Path(__file__).parent.parent.parent / "config" / "default.yaml",
+            Path("config") / "default.yaml",
+        ]
+        for p in possible_paths:
+            if p.exists():
+                config_path = p
+                break
+        else:
+            # Return default config if no file found
+            return {"app": {"name": "Exam Agent", "version": "1.0.0"}}
     else:
         config_path = Path(config_path)
+
+    if not config_path.exists():
+        return {"app": {"name": "Exam Agent", "version": "1.0.0"}, "risk": {}, "grading": {}, "proctoring": {}}
 
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)

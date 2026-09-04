@@ -1,7 +1,7 @@
 """Performance prediction — estimates future exam scores from historical data."""
 
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression as SkLinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
