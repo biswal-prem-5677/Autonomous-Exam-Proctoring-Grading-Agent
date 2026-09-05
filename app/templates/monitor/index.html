@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor — Exam Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">&#x1F393;</div>
+                <div><h1>Proctoring Agent</h1><div class="version">v2.1.0</div></div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Main</div>
+                    <div class="nav-item" onclick="window.location.href='/dashboard'"><span class="icon">&#x1F4CA;</span> Dashboard</div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Monitor</div>
+                    <div class="nav-item active"><span class="icon">&#x1F6E1;&#xFE0F;</span> Live Monitor</div>
+                    <div class="nav-item" onclick="showMonitorTab('sessions')"><span class="icon">&#x1F4CB;</span> Sessions</div>
+                    <div class="nav-item" onclick="showMonitorTab('evidence')"><span class="icon">&#x1F4A1;</span> Evidence</div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Account</div>
+                    <div class="nav-item" onclick="window.location.href='/dashboard'"><span class="icon">&#x1F464;</span> Profile</div>
+                    <div class="nav-item" onclick="App.logout()"><span class="icon">&#x279C;</span> Logout</div>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="user-avatar">M</div>
+                    <div class="user-details">
+                        <div class="user-name" id="user-name">Monitor</div>
+                        <div class="user-role" id="user-role">Viewer</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="flex-between mb-2">
+                <div>
+                    <h1 style="font-size:22px;font-weight:700;">Live Monitor</h1>
+                    <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Real-time proctoring overview</p>
+                </div>
+                <div>
+                    <span class="status-badge success"><span class="status-dot pulse"></span>Live</span>
+                </div>
+            </div>
+
+            <!-- Monitor Stats -->
+            <div class="stats-grid mt-2" id="monitor-stats">
+                <div class="stat-card">
+                    <div class="stat-header"><div class="stat-icon blue">&#x1F6E1;&#xFE0F;</div></div>
+                    <div class="stat-value" id="mon-active">0</div>
+                    <div class="stat-label">Active Sessions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header"><div class="stat-icon yellow">&#x26A0;&#xFE0F;</div></div>
+                    <div class="stat-value" id="mon-alerts">0</div>
+                    <div class="stat-label">Active Alerts</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header"><div class="stat-icon green">&#x2705;</div></div>
+                    <div class="stat-value" id="mon-clean">0</div>
+                    <div class="stat-label">Clean Sessions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header"><div class="stat-icon red">&#x1F6A8;</div></div>
+                    <div class="stat-value" id="mon-flagged">0</div>
+                    <div class="stat-label">Flagged</div>
+                </div>
+            </div>
+
+            <!-- Session Grid -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <div class="card-title">&#x1F6E1;&#xFE0F; Active Sessions</div>
+                    <button class="btn btn-sm btn-secondary" onclick="loadMonitorSessions()">&#x1F504; Refresh</button>
+                </div>
+                <div id="monitor-sessions">
+                    <div class="empty-state">
+                        <div class="icon">&#x1F6E1;&#xFE0F;</div>
+                        <h3>Loading sessions...</h3>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    let monitorInterval = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadMonitorSessions();
+        monitorInterval = setInterval(loadMonitorSessions, 5000);
+    });
+
+    async function loadMonitorSessions() {
+        try {
+            const [sessionsRes, dashboardRes] = await Promise.all([
+                App.apiGet('/api/sessions'),
+                App.apiGet('/api/dashboard'),
+            ]).catch(() => [{}]);
+
+            const sessions = sessionsRes.sessions || [];
+            const evidence = dashboardRes.recent_evidence || [];
+
+            // Update stats
+            document.getElementById('mon-active').textContent = dashboardRes.active_sessions || sessions.length;
+            document.getElementById('mon-alerts').textContent = dashboardRes.review_sessions || 0;
+            document.getElementById('mon-flagged').textContent = evidence.filter(e => e.state !== 'NORMAL').length;
+
+            const container = document.getElementById('monitor-sessions');
+            if (sessions.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F6E1;&#xFE0F;</div><h3>No active sessions</h3></div>';
+                return;
+            }
+
+            container.innerHTML = sessions.map(s => {
+                const risk = s.risk_score || 0;
+                const riskPct = Math.round(risk * 100);
+                const state = s.state || 'normal';
+                const stateClass = state === 'normal' ? 'success' : state === 'suspicious' ? 'warning' : 'danger';
+
+                return `<div class="evidence-item">
+                    <div class="evidence-icon ${state === 'normal' ? 'info' : 'warning'}">
+                        ${state === 'normal' ? '&#x2705;' : '&#x26A0;&#xFE0F;'}
+                    </div>
+                    <div class="evidence-body">
+                        <div class="evidence-title">${s.student_id} — ${s.exam_id}</div>
+                        <div class="evidence-meta">
+                            <span>Started: ${s.started_at ? new Date(s.started_at).toLocaleTimeString() : '-'}</span>
+                            <span>Risk: ${riskPct}%</span>
+                        </div>
+                        <div class="risk-meter" style="margin-top:8px;">
+                            <div class="risk-fill ${risk < 0.3 ? 'low' : risk < 0.6 ? 'medium' : 'high'}" style="width:${Math.min(riskPct, 100)}%"></div>
+                        </div>
+                    </div>
+                    <span class="status-badge ${stateClass}">${state}</span>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            console.error('Monitor load failed:', e);
+        }
+    }
+
+    function showMonitorTab(tab) {
+        // Simple tab handling
+    }
+    </script>
+</body>
+</html>

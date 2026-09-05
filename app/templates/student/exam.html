@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam — Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <!-- Pre-exam: Camera check + Exam instructions -->
+    <div id="pre-exam-screen">
+        <div class="login-page">
+            <div class="login-card fade-in" style="max-width: 700px;">
+                <div class="login-header">
+                    <div class="login-logo">&#x1F393;</div>
+                    <h2 id="exam-title">Exam</h2>
+                    <p id="exam-topic">Loading...</p>
+                </div>
+
+                <!-- Instructions -->
+                <div id="exam-instructions" class="card" style="margin-bottom:20px;background:var(--bg-secondary);border:1px solid var(--border);">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:8px;">&#x1F4CB; Instructions</h3>
+                    <p id="instructions-text" style="font-size:14px;color:var(--text-secondary);">Loading exam instructions...</p>
+                </div>
+
+                <!-- Preflight Checks -->
+                <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">&#x1F6E1;&#xFE0F; Pre-Exam Checks</h3>
+                <div id="preflight-checks" style="margin-bottom:20px;">
+                    <div class="empty-state" style="padding:30px 20px;"><p>Running checks...</p></div>
+                </div>
+
+                <!-- Webcam Preview -->
+                <div id="webcam-section" style="margin-bottom:20px;">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">&#x1F4F8; Camera Preview</h3>
+                    <div style="display:flex;justify-content:center;">
+                        <video id="webcam-preview" autoplay playsinline muted
+                            style="width:320px;max-width:100%;border-radius:var(--radius);border:2px solid var(--border);background:#000;"></video>
+                    </div>
+                    <canvas id="webcam-canvas" style="display:none;"></canvas>
+                </div>
+
+                <!-- Start Exam Button -->
+                <button class="btn btn-primary btn-block btn-lg" id="start-exam-btn" disabled>
+                    &#x1F3C1; Start Exam
+                </button>
+                <p id="start-error" style="text-align:center;color:var(--danger);font-size:13px;margin-top:10px;display:none;"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Exam Screen -->
+    <div id="exam-screen" style="display:none;">
+        <div class="app-container">
+            <div class="main-content" style="margin-left:0;">
+                <!-- Exam Header Bar -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <span style="font-weight:600;" id="active-exam-title">Exam</span>
+                        <span class="status-badge success ml-1" style="margin-left:8px;"><span class="status-dot pulse"></span>Live</span>
+                    </div>
+                    <div style="display:flex;gap:16px;align-items:center;">
+                        <span style="font-size:13px;color:var(--text-secondary);">&#x1F552; <span id="exam-timer">00:00</span></span>
+                        <span style="font-size:13px;color:var(--text-secondary);">Question <span id="q-current">1</span>/<span id="q-total">0</span></span>
+                        <span style="font-size:13px;color:var(--text-secondary);">&#x1F30D; Risk: <span id="live-risk">0%</span></span>
+                        <button class="btn btn-danger btn-sm" onclick="confirmSubmit()">&#x1F4E4; Submit</button>
+                    </div>
+                </div>
+
+                <!-- Risk Meter -->
+                <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 20px;margin-bottom:16px;">
+                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                        <span style="color:var(--text-secondary);">Proctoring Risk Level</span>
+                        <span id="risk-label" style="font-weight:600;color:var(--success);">Low</span>
+                    </div>
+                    <div class="risk-meter">
+                        <div class="risk-fill low" id="risk-bar" style="width:0%"></div>
+                    </div>
+                </div>
+
+                <!-- Proctoring Feed -->
+                <div class="grid-2" style="margin-bottom:16px;">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">&#x1F4F8; Camera Feed</div>
+                            <span class="status-badge success" id="cam-status"><span class="status-dot"></span>Active</span>
+                        </div>
+                        <video id="exam-webcam" autoplay playsinline muted
+                            style="width:100%;border-radius:var(--radius);background:#000;min-height:200px;"></video>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">&#x1F514; Detection Log</div>
+                            <span class="status-badge neutral" id="event-count">0 events</span>
+                        </div>
+                        <div id="event-log" style="max-height:250px;overflow-y:auto;">
+                            <div class="empty-state" style="padding:30px 20px;"><p style="font-size:13px;">Monitoring active...</p></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Question Area -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">&#x2753; Questions</div>
+                        <div id="q-nav" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+                    </div>
+                    <div id="question-area">
+                        <div id="question-content"></div>
+                        <div id="answer-area" style="margin-top:16px;"></div>
+                        <div style="display:flex;justify-content:space-between;margin-top:20px;">
+                            <button class="btn btn-secondary" id="prev-btn" onclick="navigateQuestion(-1)" disabled>&#x25C0; Previous</button>
+                            <button class="btn btn-primary" id="next-btn" onclick="navigateQuestion(1)">Next &#x25B6;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Submit Confirmation Modal -->
+    <div id="submit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:none;align-items:center;justify-content:center;">
+        <div class="card" style="max-width:500px;margin:20px;">
+            <div class="card-header">
+                <div class="card-title">&#x26A0;&#xFE0F; Confirm Submission</div>
+            </div>
+            <p style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;">You are about to submit your exam. This action cannot be undone.</p>
+            <p style="font-size:14px;" id="submit-summary"></p>
+            <div class="form-actions" style="justify-content:flex-end;margin-top:20px;">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="submitExam()">&#x2705; Submit Exam</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ─── State ───────────────────────────────────────────────────────────────
+
+    let examData = null;
+    let questions = [];
+    let currentQuestion = 0;
+    let answers = {};
+    let examStartTime = null;
+    let examTimer = null;
+    let proctoringInterval = null;
+    let webcamStream = null;
+    let proctoringEvents = [];
+    let visionAnalysis = {};
+
+    // ─── Preflight ──────────────────────────────────────────────────────────
+
+    async function runPreflight() {
+        const checks = {
+            camera_available: false,
+            microphone_available: false,
+            online: navigator.onLine,
+            browser_capabilities: {
+                fullscreen: document.fullscreenEnabled,
+                get_user_media: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+            },
+        };
+
+        // Check camera
+        try {
+            webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            checks.camera_available = true;
+            const video = document.getElementById('webcam-preview');
+            video.srcObject = webcamStream;
+        } catch (e) {
+            console.warn('Camera not available:', e);
+        }
+
+        // Run preflight via API
+        try {
+            const result = await App.apiPost('/api/preflight', {
+                require_webcam: true,
+                lock_fullscreen: false,
+                camera_available: checks.camera_available,
+                online: checks.online,
+                browser_capabilities: checks.browser_capabilities,
+            });
+
+            const container = document.getElementById('preflight-checks');
+            if (result.checks) {
+                container.innerHTML = Object.entries(result.checks).map(([name, c]) => {
+                    const icon = c.passed ? '&#x2705;' : '&#x274C;';
+                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--radius);background:var(--bg-card);margin-bottom:4px;">
+                        <span style="font-size:13px;font-weight:500;">${name.charAt(0).toUpperCase() + name.slice(1)}</span>
+                        <span style="font-size:13px;${c.passed ? 'color:var(--success)' : 'color:var(--danger)'}">${icon} ${c.message}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            if (result.can_proceed) {
+                document.getElementById('start-exam-btn').disabled = false;
+            } else {
+                document.getElementById('start-error').style.display = 'block';
+                document.getElementById('start-error').textContent = 'Some required checks failed. Please resolve them.';
+            }
+        } catch (e) {
+            document.getElementById('start-exam-btn').disabled = true;
+            document.getElementById('start-error').style.display = 'block';
+            document.getElementById('start-error').textContent = 'Preflight check failed: ' + e.message;
+        }
+    }
+
+    // ─── Start Exam ──────────────────────────────────────────────────────────
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const examId = urlParams.get('exam_id') || urlParams.get('examId') || 'default';
+        const studentId = App.currentUser?.username || 'student';
+
+        // Load exam details
+        try {
+            const examInfo = await App.apiGet(`/api/exams/${examId}`);
+            if (examInfo.exam) {
+                examData = examInfo.exam;
+                document.getElementById('exam-title').textContent = examData.title || 'Exam';
+                document.getElementById('exam-topic').textContent = examData.topic || '';
+                document.getElementById('active-exam-title').textContent = examData.title || 'Exam';
+                if (examData.questions) {
+                    questions = examData.questions;
+                }
+                const settings = examInfo.settings || {};
+                document.getElementById('instructions-text').textContent = settings.instructions || 'Complete all questions. Do not communicate with others.';
+            }
+        } catch (e) {
+            document.getElementById('exam-title').textContent = 'Exam';
+        }
+
+        App.startExamSession(studentId, examId);
+        await runPreflight();
+    });
+
+    document.getElementById('start-exam-btn')?.addEventListener('click', startExam);
+
+    async function startExam() {
+        document.getElementById('pre-exam-screen').style.display = 'none';
+        document.getElementById('exam-screen').style.display = 'block';
+
+        // Move webcam to exam view
+        const examVideo = document.getElementById('exam-webcam');
+        if (webcamStream) {
+            examVideo.srcObject = webcamStream;
+        }
+
+        examStartTime = Date.now();
+        App.examSession.startTime = examStartTime;
+
+        // Try fullscreen
+        try {
+            await document.documentElement.requestFullscreen?.();
+        } catch (e) { /* fullscreen not required */ }
+
+        // Load questions if not loaded
+        if (questions.length === 0) {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const examId = urlParams.get('exam_id') || urlParams.get('examId') || 'default';
+                const data = await App.apiGet(`/api/exams/${examId}`);
+                if (data.exam?.questions) {
+                    questions = data.exam.questions;
+                }
+            } catch (e) { console.error('Failed to load questions:', e); }
+        }
+
+        document.getElementById('q-total').textContent = questions.length;
+        buildQuestionNav();
+        renderQuestion();
+        startTimer();
+        startProctoring();
+    }
+
+    // ─── Timer ───────────────────────────────────────────────────────────────
+
+    function startTimer() {
+        examTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - examStartTime) / 1000);
+            const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            const secs = String(elapsed % 60).padStart(2, '0');
+            const el = document.getElementById('exam-timer');
+            if (el) el.textContent = `${mins}:${secs}`;
+        }, 1000);
+    }
+
+    // ─── Questions ───��───────────────────────────────────────────────────────
+
+    function buildQuestionNav() {
+        const nav = document.getElementById('q-nav');
+        nav.innerHTML = questions.map((_, i) => {
+            const answered = answers[i] !== undefined;
+            const cls = i === currentQuestion ? 'active' : '';
+            return `<button class="btn btn-sm ${answered ? 'btn-success' : 'btn-secondary'}" onclick="goToQuestion(${i})" style="min-width:32px;">${i + 1}</button>`;
+        }).join('');
+    }
+
+    function renderQuestion() {
+        const q = questions[currentQuestion];
+        if (!q) return;
+
+        document.getElementById('q-current').textContent = currentQuestion + 1;
+
+        const typeLabel = { mcq: 'Multiple Choice', numerical: 'Numerical', short_answer: 'Short Answer', long_answer: 'Long Answer' };
+        const content = document.getElementById('question-content');
+        content.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                <span class="status-badge info">Q${currentQuestion + 1}</span>
+                <span style="font-size:13px;color:var(--text-muted);">${typeLabel[q.type] || q.type} — ${q.marks} mark(s)</span>
+            </div>
+            <p style="font-size:16px;line-height:1.7;">${escapeHtml(q.text)}</p>
+        `;
+
+        const area = document.getElementById('answer-area');
+        if (q.type === 'mcq' && q.options) {
+            const opts = Array.isArray(q.options) ? q.options : (q.options ? q.options.split(',') : []);
+            area.innerHTML = opts.map((opt, i) => {
+                const selected = answers[currentQuestion] === opt ? 'border-color:var(--accent);background:var(--accent-light);' : '';
+                return `<label style="display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;margin-bottom:8px;transition:var(--transition);${selected}">
+                    <input type="radio" name="answer" value="${escapeHtml(opt)}" ${answers[currentQuestion] === opt ? 'checked' : ''} onchange="saveAnswer(this.value)">
+                    <span>${escapeHtml(opt)}</span>
+                </label>`;
+            }).join('');
+        } else if (q.type === 'numerical') {
+            area.innerHTML = `<input type="number" class="form-input" placeholder="Enter numerical answer" value="${answers[currentQuestion] || ''}" oninput="saveAnswer(this.value)" step="any" style="max-width:300px;">`;
+        } else {
+            area.innerHTML = `<textarea class="form-textarea" placeholder="Type your answer here..." oninput="saveAnswer(this.value)" style="min-height:150px;">${answers[currentQuestion] || ''}</textarea>`;
+        }
+
+        // Navigation buttons
+        document.getElementById('prev-btn').disabled = currentQuestion === 0;
+        document.getElementById('next-btn').textContent = currentQuestion === questions.length - 1 ? 'Finish' : 'Next ▶';
+
+        buildQuestionNav();
+    }
+
+    function saveAnswer(value) {
+        answers[currentQuestion] = value;
+        App.submitAnswer(questions[currentQuestion].id, value);
+        buildQuestionNav();
+    }
+
+    function navigateQuestion(direction) {
+        const next = currentQuestion + direction;
+        if (next >= 0 && next < questions.length) {
+            currentQuestion = next;
+            renderQuestion();
+        }
+    }
+
+    function goToQuestion(index) {
+        currentQuestion = index;
+        renderQuestion();
+    }
+
+    function confirmSubmit() {
+        const answered = Object.keys(answers).length;
+        const modal = document.getElementById('submit-modal');
+        modal.style.display = 'flex';
+        document.getElementById('submit-summary').textContent =
+            `${answered} of ${questions.length} questions answered. Are you sure?`;
+    }
+
+    function closeModal() {
+        document.getElementById('submit-modal').style.display = 'none';
+    }
+
+    async function submitExam() {
+        closeModal();
+
+        // Stop camera
+        if (webcamStream) {
+            webcamStream.getTracks().forEach(t => t.stop());
+        }
+        if (examTimer) clearInterval(examTimer);
+        if (proctoringInterval) clearInterval(proctoringInterval);
+
+        try {
+            // Submit answers
+            await App.apiPost('/api/grading/submit', {
+                student_id: App.examSession.studentId,
+                exam_id: App.examSession.examId,
+                answers: answers,
+            });
+
+            document.getElementById('exam-screen').innerHTML = `
+                <div class="login-page">
+                    <div class="login-card fade-in" style="text-align:center;max-width:500px;">
+                        <div style="font-size:64px;margin-bottom:16px;">&#x2705;</div>
+                        <h2>Exam Submitted</h2>
+                        <p style="color:var(--text-secondary);margin-top:8px;">Your answers have been submitted successfully.</p>
+                        <p style="color:var(--text-secondary);font-size:14px;">Proctoring data is being analyzed.</p>
+                        <button class="btn btn-primary mt-2" onclick="window.location.href='/'">Back to Dashboard</button>
+                    </div>
+                </div>
+            `;
+        } catch (e) {
+            alert('Submission error: ' + e.message);
+        }
+    }
+
+    // ─── Proctoring ──────────────────────────────────────────────────────────
+
+    function startProctoring() {
+        proctoringInterval = setInterval(async () => {
+            await runProctoringCheck();
+        }, 5000);
+
+        // Run first check immediately
+        setTimeout(runProctoringCheck, 1000);
+    }
+
+    async function runProctoringCheck() {
+        const elapsed = App.getExamElapsed();
+
+        // Gather browser stats
+        const browserStats = App.getBrowserStats();
+        const keyboardStats = { events_per_minute: 0, mean_key_hold: 0, mean_latency: 0, deviation: 0.0 };
+        const mouseStats = { avg_speed: 0, total_distance: 0, click_rate: 0, deviation: 0.0 };
+
+        // Send behavioral analysis
+        try {
+            const analysis = await App.apiPost('/api/behavioral/analyze', {
+                session_key: App.examSession?.session_key || 'default',
+                face_present: true,
+                face_count: 1,
+                keyboard: keyboardStats,
+                mouse: mouseStats,
+                browser: browserStats,
+                session_elapsed: elapsed,
+            });
+
+            // Update risk display
+            if (analysis.anomaly_score !== undefined) {
+                const risk = analysis.anomaly_score;
+                updateRiskDisplay(risk);
+            }
+
+            // Log browser events
+            if (browserStats.tab_switches > 0) {
+                addProctoringEvent('Tab Switch Detected', 'warning', `Tab switches: ${browserStats.tab_switches}`);
+            }
+            if (browserStats.fullscreen_exits > 0) {
+                addProctoringEvent('Fullscreen Exit', 'danger', `Exited fullscreen ${browserStats.fullscreen_exits} times`);
+            }
+        } catch (e) {
+            // Silently handle proctoring errors
+        }
+    }
+
+    function updateRiskDisplay(risk) {
+        const pct = Math.round(risk * 100);
+        const bar = document.getElementById('risk-bar');
+        const label = document.getElementById('risk-label');
+        const liveRisk = document.getElementById('live-risk');
+
+        if (bar) bar.style.width = pct + '%';
+        if (liveRisk) liveRisk.textContent = pct + '%';
+
+        let cls, color;
+        if (risk < 0.3) { cls = 'low'; color = 'var(--success)'; }
+        else if (risk < 0.6) { cls = 'medium'; color = 'var(--warning)'; }
+        else if (risk < 0.8) { cls = 'high'; color = '#f97316'; }
+        else { cls = 'critical'; color = 'var(--danger)'; }
+
+        if (bar) { bar.className = 'risk-fill ' + cls; }
+        if (label) { label.textContent = cls.replace('critical', 'Critical').replace('high', 'High').replace('medium', 'Medium'); label.style.color = color; }
+    }
+
+    function addProctoringEvent(title, type, detail) {
+        proctoringEvents.push({ title, type, detail, time: new Date() });
+        const container = document.getElementById('event-log');
+        const icon = type === 'danger' ? '&#x26A0;&#xFE0F;' : type === 'warning' ? '&#x1F4A1;' : '&#x1F514;';
+        const cls = type === 'danger' ? 'danger' : type === 'warning' ? 'warning' : 'info';
+
+        const item = document.createElement('div');
+        item.className = 'evidence-item';
+        item.innerHTML = `
+            <div class="evidence-icon ${cls}">${icon}</div>
+            <div class="evidence-body">
+                <div class="evidence-title">${escapeHtml(title)}</div>
+                <div class="evidence-meta"><span>${escapeHtml(detail || '')}</span><span>${new Date().toLocaleTimeString()}</span></div>
+            </div>
+        `;
+
+        if (container.querySelector('.empty-state')) container.innerHTML = '';
+        container.prepend(item);
+        document.getElementById('event-count').textContent = proctoringEvents.length + ' events';
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+    </script>
+</body>
+</html>

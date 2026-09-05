@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grading — Exam Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">&#x1F393;</div>
+                <div>
+                    <h1>Proctoring Agent</h1>
+                    <div class="version">v2.1.0</div>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Main</div>
+                    <div class="nav-item" onclick="window.location.href='/dashboard'">
+                        <span class="icon">&#x1F4CA;</span> Dashboard
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Grading</div>
+                    <div class="nav-item active">
+                        <span class="icon">&#x2705;</span> Grade Submissions
+                    </div>
+                    <div class="nav-item" onclick="showGradingTab('analytics')">
+                        <span class="icon">&#x1F4C8;</span> Grading Analytics
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Exams</div>
+                    <div class="nav-item" onclick="showGradingTab('create')">
+                        <span class="icon">&#x2795;</span> Create Exam
+                    </div>
+                    <div class="nav-item" onclick="window.location.href='/sessions'">
+                        <span class="icon">&#x1F6E1;&#xFE0F;</span> Sessions
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Account</div>
+                    <div class="nav-item" onclick="window.location.href='/dashboard'">
+                        <span class="icon">&#x1F464;</span> Profile
+                    </div>
+                    <div class="nav-item" onclick="App.logout()">
+                        <span class="icon">&#x279C;</span> Logout
+                    </div>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="user-avatar">E</div>
+                    <div class="user-details">
+                        <div class="user-name" id="user-name">Examiner</div>
+                        <div class="user-role" id="user-role">Examiner</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <!-- Grading Tab -->
+            <div id="grading-tab">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">Grade Submissions</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Review and grade student submissions</p>
+                    </div>
+                    <select class="form-select" id="grading-exam-select" style="width:auto;" onchange="loadSubmissions()">
+                        <option value="">Select Exam...</option>
+                    </select>
+                </div>
+
+                <!-- Grading Pipeline -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">&#x1F4CB; Submissions</div>
+                            <div class="card-subtitle">Select a student to view their answers</div>
+                        </div>
+                    </div>
+                    <div id="submission-list">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F4CB;</div>
+                            <h3>Select an exam to view submissions</h3>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Student Detail (shown when selected) -->
+                <div id="grading-detail" style="display:none;" class="mt-2">
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title" id="grading-student-name">Student</div>
+                                <div class="card-subtitle" id="grading-exam-name">Exam</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:24px;font-weight:700;" id="grading-total">0 / 0</div>
+                                <div style="font-size:13px;color:var(--text-secondary);" id="grading-pct">0%</div>
+                            </div>
+                        </div>
+                        <div id="grading-questions"></div>
+                        <div style="margin-top:16px;display:flex;justify-content:flex-end;">
+                            <button class="btn btn-primary" onclick="releaseGrades()">&#x1F4E4; Release Grades</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    let currentGradingSession = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadExamsForGrading();
+    });
+
+    async function loadExamsForGrading() {
+        try {
+            const data = await App.apiGet('/api/exams');
+            const select = document.getElementById('grading-exam-select');
+            if (data.exams) {
+                data.exams.forEach(e => {
+                    const opt = document.createElement('option');
+                    opt.value = e.exam_id;
+                    opt.textContent = e.title;
+                    select.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load exams:', e);
+        }
+    }
+
+    async function loadSubmissions() {
+        const examId = document.getElementById('grading-exam-select').value;
+        if (!examId) return;
+
+        try {
+            const data = await App.apiGet(`/api/examiner/submissions?exam_id=${examId}`);
+            const container = document.getElementById('submission-list');
+
+            if (!data.submissions || data.submissions.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4CB;</div><h3>No submissions yet</h3></div>';
+                return;
+            }
+
+            container.innerHTML = `<table class="data-table">
+                <thead><tr><th>Student</th><th>ID</th><th>Score</th><th>Percentage</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>${data.submissions.map(s => {
+                    const pct = s.percentage || 0;
+                    const statusCls = pct >= 75 ? 'success' : pct >= 40 ? 'warning' : 'danger';
+                    return `<tr>
+                        <td>${s.student_name || s.student_id}</td>
+                        <td><code style="font-size:12px;color:var(--accent);">${s.student_id}</code></td>
+                        <td>${s.total_score || 0} / ${s.total_max || 0}</td>
+                        <td><strong>${pct}%</strong></td>
+                        <td><span class="status-badge ${statusCls}">${pct >= 75 ? 'Passed' : pct >= 40 ? 'Borderline' : 'Failed'}</span></td>
+                        <td><button class="btn btn-sm btn-primary" onclick="viewSubmission('${s.student_id}', '${examId}')">View</button></td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
+        } catch (e) {
+            console.error('Failed to load submissions:', e);
+        }
+    }
+
+    async function viewSubmission(studentId, examId) {
+        try {
+            const data = await App.apiGet(`/api/grading/inspect/${studentId}/${examId}`);
+            currentGradingSession = data;
+            document.getElementById('grading-detail').style.display = 'block';
+            document.getElementById('grading-student-name').textContent = data.student_id;
+            document.getElementById('grading-exam-name').textContent = data.exam_id;
+
+            const total = data.total_score || 0;
+            const max = data.total_max || 0;
+            const pct = data.percentage || 0;
+            document.getElementById('grading-total').textContent = `${total} / ${max}`;
+            document.getElementById('grading-pct').textContent = `${pct}%`;
+
+            const container = document.getElementById('grading-questions');
+            const questions = Object.entries(data.per_question || {});
+            container.innerHTML = questions.map(([qid, q]) => {
+                const isCorrect = q.correct;
+                const icon = isCorrect ? '&#x2705;' : '&#x274C;';
+                const borderColor = isCorrect ? 'var(--success)' : 'var(--danger)';
+
+                let detailsHtml = '';
+                if (q.details && typeof q.details === 'object') {
+                    detailsHtml = `<div style="background:var(--bg-secondary);padding:12px;border-radius:var(--radius);margin-top:10px;font-size:13px;">
+                        <div style="font-weight:500;margin-bottom:6px;color:var(--text-muted);">Grading Details</div>
+                        <pre style="white-space:pre-wrap;font-size:12px;">${JSON.stringify(q.details, null, 2)}</pre>
+                    </div>`;
+                }
+
+                return `<div style="border:1px solid ${borderColor};border-radius:var(--radius);padding:16px;margin-bottom:12px;opacity:0.9;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+                        <div style="flex:1;">
+                            <div style="font-weight:500;font-size:14px;">Q${qid}: ${escapeHtml(q.question_text || 'Question')}</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${q.question_type} — ${q.marks} mark(s)</div>
+                        </div>
+                        <div style="text-align:right;margin-left:16px;">
+                            <div style="font-size:18px;">${icon}</div>
+                            <div style="font-size:14px;font-weight:600;">${q.score}/${q.max_score}</div>
+                        </div>
+                    </div>
+                    <div style="font-size:13px;color:var(--text-secondary);">
+                        <strong>Answer:</strong> ${escapeHtml(q.student_answer || '(not answered)')}<br>
+                        ${q.correct_answer ? `<strong>Correct:</strong> ${escapeHtml(q.correct_answer)}` : ''}
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">
+                        Method: ${q.grading_method || 'auto'} | ${q.cosine_similarity ? `Similarity: ${Math.round((q.cosine_similarity||0)*100)}%` : ''} ${q.keyword_coverage ? `| Coverage: ${Math.round((q.keyword_coverage||0)*100)}%` : ''}
+                    </div>
+                    ${detailsHtml}
+                </div>`;
+            }).join('');
+
+            // Scroll to detail
+            document.getElementById('grading-detail').scrollIntoView({ behavior: 'smooth' });
+        } catch (e) {
+            alert('Failed to load submission: ' + e.message);
+        }
+    }
+
+    async function releaseGrades() {
+        if (!currentGradingSession) return;
+        try {
+            await App.apiPost(`/api/grading/release/${currentGradingSession.student_id}/${currentGradingSession.exam_id}`);
+            alert('Grades released successfully!');
+        } catch (e) {
+            alert('Failed to release grades: ' + e.message);
+        }
+    }
+
+    function showGradingTab(tab) {
+        // Tab switching for grading section
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+    </script>
+</body>
+</html>

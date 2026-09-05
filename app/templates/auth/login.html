@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Exam Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <div class="login-page">
+        <div class="login-card fade-in">
+            <div class="login-header">
+                <div class="login-logo">&#x1F393;</div>
+                <h2>Exam Proctoring Agent</h2>
+                <p>Sign in to access the platform</p>
+            </div>
+
+            <div id="login-alert"></div>
+
+            <form id="login-form" class="login-form">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" id="login-username" class="form-input" placeholder="Enter your username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="login-password" class="form-input" placeholder="Enter your password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-btn">
+                    Sign In
+                </button>
+            </form>
+
+            <div class="login-footer">
+                <p>Don't have an account? <a href="/register">Create one</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (async () => {
+        // Check if already logged in
+        if (localStorage.getItem('token')) {
+            window.location.href = '/';
+            return;
+        }
+
+        const form = document.getElementById('login-form');
+        const btn = document.getElementById('login-btn');
+        const alertEl = document.getElementById('login-alert');
+
+        function showAlert(message, type = 'error') {
+            alertEl.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            setTimeout(() => alertEl.innerHTML = '', 5000);
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+
+            try {
+                const username = document.getElementById('login-username').value.trim();
+                const password = document.getElementById('login-password').value;
+
+                const data = await App.login(username, password);
+                showAlert('Login successful! Redirecting...', 'success');
+
+                const role = data.user.role;
+                if (role === 'student') window.location.href = '/student';
+                else if (role === 'examiner' || role === 'admin') window.location.href = '/examiner';
+                else if (role === 'super_admin') window.location.href = '/admin';
+                else window.location.href = '/';
+            } catch (err) {
+                showAlert(err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

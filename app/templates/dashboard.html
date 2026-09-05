@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Exam Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">&#x1F393;</div>
+                <div>
+                    <h1>Proctoring Agent</h1>
+                    <div class="version">v2.1.0</div>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Main</div>
+                    <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+                        <span class="icon">&#x1F4CA;</span> Dashboard
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Exams</div>
+                    <div class="nav-item" data-page="exams" onclick="showPage('exams')">
+                        <span class="icon">&#x1F4D6;</span> Exams
+                    </div>
+                    <div class="nav-item" data-page="training" onclick="showPage('training')">
+                        <span class="icon">&#x269B;&#xFE0F;</span> ML Training
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Proctoring</div>
+                    <div class="nav-item" data-page="sessions" onclick="showPage('sessions')">
+                        <span class="icon">&#x1F6E1;&#xFE0F;</span> Sessions
+                        <span class="badge badge-danger" id="review-badge" style="display:none">0</span>
+                    </div>
+                    <div class="nav-item" data-page="analytics" onclick="showPage('analytics')">
+                        <span class="icon">&#x1F4C8;</span> Analytics
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Account</div>
+                    <div class="nav-item" data-page="profile" onclick="showPage('profile')">
+                        <span class="icon">&#x1F464;</span> Profile
+                    </div>
+                    <div class="nav-item" onclick="App.logout()">
+                        <span class="icon">&#x279C;</span> Logout
+                    </div>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="user-avatar">U</div>
+                    <div class="user-details">
+                        <div class="user-name" id="user-name">User</div>
+                        <div class="user-role" id="user-role">Role</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Page -->
+            <div id="page-dashboard" class="page-content">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">Dashboard</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Welcome back, <span id="dash-name">User</span></p>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <span class="status-badge success"><span class="status-dot"></span>System Online</span>
+                        <span class="status-badge info" id="dash-time"></span>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="stats-grid mt-2" id="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon blue">&#x1F3AF;</div>
+                        </div>
+                        <div class="stat-value" id="stat-exams">0</div>
+                        <div class="stat-label">Active Exams</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon green">&#x1F6E1;&#xFE0F;</div>
+                        </div>
+                        <div class="stat-value" id="stat-sessions">0</div>
+                        <div class="stat-label">Proctoring Sessions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon yellow">&#x26A0;&#xFE0F;</div>
+                        </div>
+                        <div class="stat-value" id="stat-review">0</div>
+                        <div class="stat-label">Needs Review</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon cyan">&#x269B;&#xFE0F;</div>
+                        </div>
+                        <div class="stat-value" id="stat-risk">0%</div>
+                        <div class="stat-label">Avg Risk Score</div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="card mt-2">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">&#x1F4CB; Recent Evidence Log</div>
+                            <div class="card-subtitle">Latest proctoring events across all sessions</div>
+                        </div>
+                    </div>
+                    <div id="recent-evidence">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F4ED;</div>
+                            <h3>No evidence yet</h3>
+                            <p>Start a proctoring session to see events here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exams Page -->
+            <div id="page-exams" class="page-content" style="display:none">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">Exams</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Available exams and settings</p>
+                    </div>
+                </div>
+                <div class="card mt-2">
+                    <div class="card-header">
+                        <div class="card-title">&#x1F4D6; Exam List</div>
+                    </div>
+                    <div id="exam-list">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F4D6;</div>
+                            <h3>Loading exams...</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Training Page -->
+            <div id="page-training" class="page-content" style="display:none">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">ML Training</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Train and evaluate ML models</p>
+                    </div>
+                </div>
+                <div class="grid-2 mt-2">
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">&#x269B;&#xFE0F; Train Models</div>
+                                <div class="card-subtitle">Generate training data and train classifiers</div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Normal Samples</label>
+                            <input type="number" id="train-normal" class="form-input" value="100" min="10" max="1000">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Suspicious Samples</label>
+                            <input type="number" id="train-suspicious" class="form-input" value="50" min="10" max="500">
+                        </div>
+                        <button class="btn btn-primary btn-block" onclick="trainModels()">
+                            &#x26A1; Train Models
+                        </button>
+                        <div id="train-output" class="mt-1" style="display:none">
+                            <div class="alert alert-info" id="train-status">Training...</div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div>
+                                <div class="card-title">&#x1F4CA; Model Status</div>
+                                <div class="card-subtitle">ML pipeline health check</div>
+                            </div>
+                        </div>
+                        <div id="model-status">
+                            <div id="model-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sessions Page -->
+            <div id="page-sessions" class="page-content" style="display:none">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">Proctoring Sessions</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Monitor and manage active sessions</p>
+                    </div>
+                </div>
+                <div class="card mt-2">
+                    <div class="card-header">
+                        <div class="card-title">&#x1F6E1;&#xFE0F; Active Sessions</div>
+                    </div>
+                    <div id="sessions-list">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F6E1;&#xFE0F;</div>
+                            <h3>Loading sessions...</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Page -->
+            <div id="page-analytics" class="page-content" style="display:none">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">Analytics</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">System-wide analytics and reports</p>
+                    </div>
+                </div>
+                <div class="stats-grid mt-2">
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon blue">&#x1F4CA;</div>
+                        </div>
+                        <div class="stat-value" id="anl-total">0</div>
+                        <div class="stat-label">Total Sessions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon green">&#x2714;&#xFE0F;</div>
+                        </div>
+                        <div class="stat-value" id="anl-completed">0</div>
+                        <div class="stat-label">Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon yellow">&#x1F50D;</div>
+                        </div>
+                        <div class="stat-value" id="anl-accuracy">0%</div>
+                        <div class="stat-label">Model Accuracy</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <div class="stat-icon red">&#x26A0;&#xFE0F;</div>
+                        </div>
+                        <div class="stat-value" id="anl-flags">0</div>
+                        <div class="stat-label">Flagged Events</div>
+                    </div>
+                </div>
+                <div class="card mt-2">
+                    <div class="card-header">
+                        <div class="card-title">&#x1F4C8; System Analytics</div>
+                    </div>
+                    <div id="analytics-content">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F4CA;</div>
+                            <h3>Loading analytics...</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Page -->
+            <div id="page-profile" class="page-content" style="display:none">
+                <div class="flex-between mb-2">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;">Profile</h1>
+                        <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Manage your account</p>
+                    </div>
+                </div>
+                <div class="card mt-2" style="max-width:600px;">
+                    <div class="card-header">
+                        <div class="card-title">&#x1F464; Account Information</div>
+                    </div>
+                    <div id="profile-info">
+                        <div class="form-group">
+                            <label class="form-label">Username</label>
+                            <input type="text" class="form-input" id="prof-username" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" class="form-input" id="prof-fullname">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-input" id="prof-email">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Role</label>
+                            <input type="text" class="form-input" id="prof-role" readonly>
+                        </div>
+                        <button class="btn btn-primary" onclick="updateProfile()">&#x2705; Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    function showPage(page) {
+        document.querySelectorAll('.page-content').forEach(p => p.style.display = 'none');
+        document.getElementById('page-' + page).style.display = 'block';
+        App.navigate(page);
+
+        // Load page data
+        if (page === 'dashboard') loadDashboard();
+        if (page === 'exams') loadExams();
+        if (page === 'training') loadModelStatus();
+        if (page === 'sessions') loadSessions();
+        if (page === 'analytics') loadAnalytics();
+        if (page === 'profile') loadProfile();
+    }
+
+    function updateSidebarUser() {
+        const user = App.currentUser;
+        if (!user) return;
+        document.getElementById('user-avatar').textContent = (user.full_name || user.username || 'U')[0].toUpperCase();
+        document.getElementById('user-name').textContent = user.full_name || user.username;
+        document.getElementById('user-role').textContent = user.role || '';
+        document.getElementById('dash-name').textContent = user.full_name || user.username;
+    }
+
+    // ─── Dashboard ───────────────────────────────────────────────────────────
+
+    async function loadDashboard() {
+        try {
+            const data = await App.apiGet('/api/dashboard');
+            document.getElementById('stat-exams').textContent = data.active_exams_count || 0;
+            document.getElementById('stat-sessions').textContent = data.total_sessions || 0;
+            document.getElementById('stat-review').textContent = data.review_sessions || 0;
+            document.getElementById('stat-risk').textContent = Math.round((data.avg_risk_percent || 0)) + '%';
+            document.getElementById('dash-time').textContent = new Date().toLocaleTimeString();
+
+            // Recent evidence
+            const evidence = data.recent_evidence || [];
+            const container = document.getElementById('recent-evidence');
+            if (evidence.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4ED;</div><h3>No events yet</h3><p>Start a proctoring session</p></div>';
+            } else {
+                container.innerHTML = evidence.map(e => {
+                    const icon = e.event_type.includes('face') ? '&#x1F464;' :
+                                 e.event_type.includes('risk') ? '&#x26A0;&#xFE0F;' : '&#x1F514;';
+                    const cls = e.event_type.includes('risk') ? 'danger' : 'info';
+                    return `<div class="evidence-item">
+                        <div class="evidence-icon ${cls}">${icon}</div>
+                        <div class="evidence-body">
+                            <div class="evidence-title">${e.event_type}</div>
+                            <div class="evidence-meta">
+                                <span>Session: ${e.session_id}</span>
+                                <span>Source: ${e.source || 'system'}</span>
+                                <span>Confidence: ${Math.round((e.confidence || 0) * 100)}%</span>
+                            </div>
+                        </div>
+                        <span class="status-badge ${e.state === 'NORMAL' ? 'success' : 'warning'}">${e.state}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            // Review badge
+            const badge = document.getElementById('review-badge');
+            if (data.review_sessions > 0) {
+                badge.textContent = data.review_sessions;
+                badge.style.display = 'inline';
+            }
+        } catch (e) {
+            console.error('Dashboard load failed:', e);
+        }
+    }
+
+    // ─── Exams ───────────────────────────────────────────────────────────────
+
+    async function loadExams() {
+        try {
+            const data = await App.apiGet('/api/exams');
+            const container = document.getElementById('exam-list');
+            if (!data.exams || data.exams.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4D6;</div><h3>No exams available</h3></div>';
+                return;
+            }
+            container.innerHTML = `<table class="data-table">
+                <thead><tr><th>ID</th><th>Title</th><th>Topic</th><th>Difficulty</th><th>Questions</th><th>Total Marks</th><th>Action</th></tr></thead>
+                <tbody>${data.exams.map(e => `<tr>
+                    <td><code style="color:var(--accent);font-size:12px;">${e.exam_id}</code></td>
+                    <td>${e.title}</td>
+                    <td>${e.topic || '-'}</td>
+                    <td><span class="status-badge ${e.difficulty === 'hard' ? 'danger' : e.difficulty === 'medium' ? 'warning' : 'success'}">${e.difficulty || 'medium'}</span></td>
+                    <td>${e.question_count || 0}</td>
+                    <td>${e.total_marks || 0}</td>
+                    <td><button class="btn btn-sm btn-primary" onclick="App.navigate('sessions')">Start</button></td>
+                </tr>`).join('')}</tbody>
+            </table>`;
+        } catch (e) {
+            console.error('Exam load failed:', e);
+        }
+    }
+
+    // ─── ML Training ─────────────────────────────────────────────────────────
+
+    async function trainModels() {
+        const output = document.getElementById('train-output');
+        const status = document.getElementById('train-status');
+        output.style.display = 'block';
+        status.className = 'alert alert-info';
+        status.textContent = 'Generating training data and training models...';
+
+        try {
+            const normal = parseInt(document.getElementById('train-normal').value) || 100;
+            const suspicious = parseInt(document.getElementById('train-suspicious').value) || 50;
+
+            const res = await App.apiPost('/api/training/train', {
+                n_normal: normal,
+                n_suspicious: suspicious,
+            });
+
+            status.className = 'alert alert-success';
+            status.textContent = `Training complete! Logistic: ${res.logistic_regression?.accuracy || 'N/A'}, Anomaly: ${res.anomaly_detection || 'N/A'}`;
+        } catch (e) {
+            status.className = 'alert alert-error';
+            status.textContent = 'Training failed: ' + e.message;
+        }
+    }
+
+    async function loadModelStatus() {
+        try {
+            const data = await App.apiGet('/api/training/status');
+            const list = document.getElementById('model-list');
+            const models = data.models || {};
+            const items = Object.entries(models).map(([name, info]) => {
+                const statusClass = info.trained ? 'success' : 'neutral';
+                const statusText = info.trained ? 'Trained' : 'Not Trained';
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);">
+                    <div><div style="font-weight:500;font-size:14px;">${name}</div>
+                    <div style="font-size:12px;color:var(--text-muted);">${info.samples || 0} samples</div></div>
+                    <span class="status-badge ${statusClass}">${statusText}</span>
+                </div>`;
+            }).join('');
+            list.innerHTML = items || '<p style="color:var(--text-muted);">No models loaded</p>';
+        } catch (e) {
+            document.getElementById('model-list').innerHTML = '<p style="color:var(--text-muted);">Could not load status</p>';
+        }
+    }
+
+    // ─── Sessions ────────────────────────────────────────────────────────────
+
+    async function loadSessions() {
+        try {
+            const data = await App.apiGet('/api/sessions');
+            const container = document.getElementById('sessions-list');
+            if (!data.sessions || data.sessions.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F6E1;&#xFE0F;</div><h3>No active sessions</h3></div>';
+                return;
+            }
+            container.innerHTML = `<table class="data-table">
+                <thead><tr><th>Session</th><th>Student</th><th>Exam</th><th>State</th><th>Risk</th><th>Started</th></tr></thead>
+                <tbody>${data.sessions.map(s => `<tr>
+                    <td><code style="color:var(--accent);font-size:12px;">${s.session_id?.slice(-8) || '-'}</code></td>
+                    <td>${s.student_id}</td>
+                    <td>${s.exam_id}</td>
+                    <td><span class="status-badge ${s.state === 'normal' ? 'success' : s.state === 'suspicious' ? 'warning' : 'danger'}">${s.state || 'normal'}</span></td>
+                    <td>${Math.round((s.risk_score || 0) * 100)}%</td>
+                    <td>${s.started_at ? new Date(s.started_at).toLocaleString() : '-'}</td>
+                </tr>`).join('')}</tbody>
+            </table>`;
+        } catch (e) {
+            console.error('Sessions load failed:', e);
+        }
+    }
+
+    // ─── Analytics ───────────────────────────────────────────────────────────
+
+    async function loadAnalytics() {
+        try {
+            const data = await App.apiGet('/api/analytics');
+            document.getElementById('anl-total').textContent = data.total_sessions || 0;
+            document.getElementById('anl-completed').textContent = data.completed_sessions || 0;
+            document.getElementById('anl-accuracy').textContent = Math.round((data.accuracy || 0) * 100) + '%';
+            document.getElementById('anl-flags').textContent = data.flagged_events || 0;
+
+            const container = document.getElementById('analytics-content');
+            if (data.summary) {
+                container.innerHTML = `<pre style="background:var(--bg-secondary);padding:16px;border-radius:var(--radius);font-size:13px;overflow-x:auto;color:var(--text-secondary);">${JSON.stringify(data.summary, null, 2)}</pre>`;
+            } else {
+                container.innerHTML = '<p style="color:var(--text-muted);padding:20px;">No analytics data yet</p>';
+            }
+        } catch (e) {
+            console.error('Analytics load failed:', e);
+        }
+    }
+
+    // ─── Profile ──────────────────────��──────────────────────────────────────
+
+    async function loadProfile() {
+        const user = App.currentUser;
+        if (!user) return;
+        document.getElementById('prof-username').value = user.username || '';
+        document.getElementById('prof-fullname').value = user.full_name || '';
+        document.getElementById('prof-email').value = user.email || '';
+        document.getElementById('prof-role').value = user.role || '';
+    }
+
+    async function updateProfile() {
+        try {
+            await App.apiPut('/api/auth/me', {
+                full_name: document.getElementById('prof-fullname').value,
+                email: document.getElementById('prof-email').value,
+            });
+            alert('Profile updated successfully!');
+        } catch (e) {
+            alert('Update failed: ' + e.message);
+        }
+    }
+
+    // ─── Init ────────────────────────────────────────────────────────────────
+
+    document.addEventListener('DOMContentLoaded', () => {
+        updateSidebarUser();
+        loadDashboard();
+
+        // Clock update
+        setInterval(() => {
+            const el = document.getElementById('dash-time');
+            if (el) el.textContent = new Date().toLocaleTimeString();
+        }, 30000);
+    });
+    </script>
+</body>
+</html>

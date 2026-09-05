@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Exam — Exam Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">&#x1F393;</div>
+                <div><h1>Proctoring Agent</h1><div class="version">v2.1.0</div></div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Main</div>
+                    <div class="nav-item" onclick="window.location.href='/dashboard'"><span class="icon">&#x1F4CA;</span> Dashboard</div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Exam Builder</div>
+                    <div class="nav-item active"><span class="icon">&#x2795;</span> Create Exam</div>
+                    <div class="nav-item" onclick="window.location.href='/examiner/grading'"><span class="icon">&#x2705;</span> Grade Submissions</div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Account</div>
+                    <div class="nav-item" onclick="window.location.href='/dashboard'"><span class="icon">&#x1F464;</span> Profile</div>
+                    <div class="nav-item" onclick="App.logout()"><span class="icon">&#x279C;</span> Logout</div>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="user-avatar">E</div>
+                    <div class="user-details">
+                        <div class="user-name" id="user-name">Examiner</div>
+                        <div class="user-role" id="user-role">Examiner</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <h1 style="font-size:22px;font-weight:700;">Create Exam</h1>
+            <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Build exams with multiple question types</p>
+
+            <div id="exam-alert"></div>
+
+            <div class="grid-2 mt-2">
+                <!-- Exam Config -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">&#x2699;&#xFE0F; Exam Configuration</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Exam Title</label>
+                        <input type="text" id="exam-title-input" class="form-input" placeholder="e.g., Mathematics Midterm">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Topic</label>
+                        <input type="text" id="exam-topic-input" class="form-input" placeholder="e.g., Calculus">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Difficulty</label>
+                        <select id="exam-difficulty" class="form-select">
+                            <option value="easy">Easy</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="hard">Hard</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Duration (minutes)</label>
+                        <input type="number" id="exam-duration" class="form-input" value="60" min="5">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Instructions</label>
+                        <textarea id="exam-instructions-input" class="form-textarea" placeholder="Enter exam instructions for students..." style="min-height:80px;"></textarea>
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="createExam()">&#x1F4E4; Create Exam</button>
+                </div>
+
+                <!-- Question Builder -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">&#x2753; Add Questions</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Question Type</label>
+                        <select id="q-type" class="form-select" onchange="updateQuestionForm()">
+                            <option value="mcq">Multiple Choice</option>
+                            <option value="numerical">Numerical</option>
+                            <option value="short_answer">Short Answer</option>
+                            <option value="long_answer">Long Answer</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Question Text</label>
+                        <textarea id="q-text" class="form-textarea" placeholder="Enter the question..." style="min-height:80px;"></textarea>
+                    </div>
+                    <div class="form-group" id="q-options-group">
+                        <label class="form-label">Options (one per line)</label>
+                        <textarea id="q-options" class="form-textarea" placeholder="Option A&#10;Option B&#10;Option C&#10;Option D" style="min-height:100px;"></textarea>
+                    </div>
+                    <div class="form-group" id="q-correct-group">
+                        <label class="form-label">Correct Answer</label>
+                        <input type="text" id="q-correct" class="form-input" placeholder="Correct answer">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Marks</label>
+                        <input type="number" id="q-marks" class="form-input" value="1" min="0.5" step="0.5">
+                    </div>
+                    <div class="form-group" id="q-tolerance-group" style="display:none;">
+                        <label class="form-label">Tolerance</label>
+                        <input type="number" id="q-tolerance" class="form-input" value="0.01" step="0.001">
+                    </div>
+                    <div class="form-group" id="q-keywords-group" style="display:none;">
+                        <label class="form-label">Keywords (comma-separated)</label>
+                        <input type="text" id="q-keywords" class="form-input" placeholder="key1, key2, key3">
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="addQuestion()">&#x2795; Add Question</button>
+                </div>
+            </div>
+
+            <!-- Question List -->
+            <div class="card mt-2" id="questions-list-card" style="display:none;">
+                <div class="card-header">
+                    <div class="card-title">&#x1F4CB; Questions (<span id="q-count">0</span>)</div>
+                    <div style="font-size:14px;color:var(--text-secondary);">Total Marks: <strong id="total-marks">0</strong></div>
+                </div>
+                <div id="questions-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    let questions = [];
+    let createdExamId = null;
+
+    function updateQuestionForm() {
+        const type = document.getElementById('q-type').value;
+        document.getElementById('q-options-group').style.display = type === 'mcq' ? 'block' : 'none';
+        document.getElementById('q-tolerance-group').style.display = type === 'numerical' ? 'block' : 'none';
+        document.getElementById('q-keywords-group').style.display = ['short_answer', 'long_answer'].includes(type) ? 'block' : 'none';
+    }
+
+    function showAlert(msg, type) {
+        const el = document.getElementById('exam-alert');
+        el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+        setTimeout(() => el.innerHTML = '', 4000);
+    }
+
+    async function createExam() {
+        const title = document.getElementById('exam-title-input').value.trim();
+        if (!title) { showAlert('Exam title is required', 'error'); return; }
+
+        try {
+            const data = await App.apiPost('/api/exams', {
+                title,
+                topic: document.getElementById('exam-topic-input').value.trim(),
+                difficulty: document.getElementById('exam-difficulty').value,
+                duration_minutes: parseInt(document.getElementById('exam-duration').value) || 60,
+                instructions: document.getElementById('exam-instructions-input').value.trim(),
+            });
+            createdExamId = data.exam_id;
+            showAlert('Exam created! Now add questions.', 'success');
+        } catch (e) {
+            showAlert('Failed: ' + e.message, 'error');
+        }
+    }
+
+    async function addQuestion() {
+        const text = document.getElementById('q-text').value.trim();
+        if (!text) { showAlert('Question text is required', 'error'); return; }
+
+        const type = document.getElementById('q-type').value;
+        const correct = document.getElementById('q-correct').value.trim();
+        const keywordsRaw = document.getElementById('q-keywords').value.trim();
+        const keywords = keywordsRaw ? keywordsRaw.split(',').map(k => k.trim()).filter(Boolean) : [];
+
+        const question = {
+            type,
+            text,
+            marks: parseFloat(document.getElementById('q-marks').value) || 1,
+            correct_answer: correct || undefined,
+            tolerance: parseFloat(document.getElementById('q-tolerance').value) || 0.01,
+            keywords: keywords.length ? keywords : undefined,
+            options: type === 'mcq' ? document.getElementById('q-options').value.split('\n').filter(Boolean) : undefined,
+        };
+
+        if (!createdExamId) {
+            showAlert('Create an exam first', 'error');
+            return;
+        }
+
+        try {
+            await App.apiPost(`/api/exams/${createdExamId}/questions`, question);
+            questions.push(question);
+            renderQuestions();
+            // Clear form
+            document.getElementById('q-text').value = '';
+            document.getElementById('q-correct').value = '';
+            document.getElementById('q-options').value = '';
+            document.getElementById('q-keywords').value = '';
+            showAlert('Question added!', 'success');
+        } catch (e) {
+            showAlert('Failed: ' + e.message, 'error');
+        }
+    }
+
+    function renderQuestions() {
+        document.getElementById('questions-list-card').style.display = 'block';
+        document.getElementById('q-count').textContent = questions.length;
+        document.getElementById('total-marks').textContent = questions.reduce((s, q) => s + (q.marks || 0), 0);
+
+        const container = document.getElementById('questions-list');
+        container.innerHTML = questions.map((q, i) => {
+            const typeColors = { mcq: 'info', numerical: 'success', short_answer: 'warning', long_answer: 'danger' };
+            return `<div style="display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
+                <span class="status-badge ${typeColors[q.type] || 'neutral'}">${q.type}</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(q.text)}</div>
+                    <div style="font-size:12px;color:var(--text-muted);">${q.marks} marks</div>
+                </div>
+                <span style="font-size:13px;color:var(--text-muted);">#${i + 1}</span>
+            </div>`;
+        }).join('');
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    updateQuestionForm();
+    </script>
+</body>
+</html>

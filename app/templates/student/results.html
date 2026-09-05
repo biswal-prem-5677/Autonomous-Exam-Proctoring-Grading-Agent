@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Results — Exam Proctoring Agent</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">&#x1F393;</div>
+                <div>
+                    <h1>Proctoring Agent</h1>
+                    <div class="version">v2.1.0</div>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Main</div>
+                    <div class="nav-item" onclick="App.navigate('dashboard');window.location.href='/dashboard'">
+                        <span class="icon">&#x1F4CA;</span> Dashboard
+                    </div>
+                    <div class="nav-item" onclick="window.location.href='/exam'">
+                        <span class="icon">&#x1F4D6;</span> Take Exam
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Results</div>
+                    <div class="nav-item active">
+                        <span class="icon">&#x1F4CA;</span> My Results
+                    </div>
+                    <div class="nav-item" onclick="window.location.href='/sessions'">
+                        <span class="icon">&#x1F6E1;&#xFE0F;</span> Sessions
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Account</div>
+                    <div class="nav-item" onclick="App.navigate('profile');window.location.href='/dashboard'">
+                        <span class="icon">&#x1F464;</span> Profile
+                    </div>
+                    <div class="nav-item" onclick="App.logout()">
+                        <span class="icon">&#x279C;</span> Logout
+                    </div>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="user-avatar">U</div>
+                    <div class="user-details">
+                        <div class="user-name" id="user-name">User</div>
+                        <div class="user-role" id="user-role">Student</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <h1 style="font-size:22px;font-weight:700;">My Results</h1>
+            <p style="color:var(--text-secondary);font-size:14px;margin-top:2px;">Your exam results and proctoring summary</p>
+
+            <div id="results-container">
+                <div class="empty-state">
+                    <div class="icon">&#x1F4CB;</div>
+                    <h3>Loading results...</h3>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    async function loadResults() {
+        try {
+            const data = await App.apiGet('/api/student/results');
+            renderResults(data);
+        } catch (e) {
+            document.getElementById('results-container').innerHTML =
+                `<div class="alert alert-error">Failed to load results: ${e.message}</div>`;
+        }
+    }
+
+    function renderResults(data) {
+        const container = document.getElementById('results-container');
+        const results = data.results || data || [];
+
+        if (!results.length) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4CB;</div><h3>No results yet</h3><p>Complete an exam to see results</p></div>';
+            return;
+        }
+
+        container.innerHTML = results.map(r => {
+            const pct = r.percentage || 0;
+            const grade = pct >= 90 ? 'A' : pct >= 75 ? 'B' : pct >= 60 ? 'C' : pct >= 40 ? 'D' : 'F';
+            const gradeColor = pct >= 75 ? 'var(--success)' : pct >= 60 ? 'var(--info)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)';
+
+            return `<div class="card mt-2">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">${r.exam_title || r.exam_id || 'Exam'}</div>
+                        <div class="card-subtitle">${r.submitted_at ? new Date(r.submitted_at).toLocaleString() : ''}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:36px;font-weight:700;color:${gradeColor};">${grade}</div>
+                        <div style="font-size:14px;color:var(--text-secondary);">${pct}%</div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:24px;margin-bottom:16px;">
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);">Score</div>
+                        <div style="font-size:20px;font-weight:600;">${r.total_score || 0} / ${r.total_max || 0}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);">Questions</div>
+                        <div style="font-size:20px;font-weight:600;">${r.answered || 0}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);">Risk Score</div>
+                        <div style="font-size:20px;font-weight:600;${r.risk_score > 0.5 ? 'color:var(--warning)' : ''}">${Math.round((r.risk_score || 0) * 100)}%</div>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width:${pct}%;${pct < 40 ? 'background:var(--danger)' : ''}"></div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    document.addEventListener('DOMContentLoaded', loadResults);
+    </script>
+</body>
+</html>
