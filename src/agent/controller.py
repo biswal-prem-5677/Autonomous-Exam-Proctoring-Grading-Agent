@@ -3,6 +3,7 @@
 import time
 import uuid
 import threading
+from datetime import datetime
 from typing import Dict, Any, Optional, List, Callable
 from enum import Enum
 
@@ -115,6 +116,7 @@ class ProctoringAgent:
         self._iteration += 1
         result = {
             "iteration": self._iteration,
+            "timestamp": datetime.now().isoformat(),
             "phase": None,
             "risk_score": 0.0,
             "state": self._state.value,

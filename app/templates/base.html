@@ -16,8 +16,8 @@
 
     <script src="/static/js/app.js"></script>
     <script>
-        App.currentUser = {{ current_user | tojson }};
-        App.authToken = "{{ token or '' }}";
+        App.currentUser = {{ current_user | default({}) | tojson }};
+        App.authToken = "{{ token | default('') }}";
     </script>
     {% block scripts %}{% endblock %}
 </body>

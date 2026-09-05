@@ -11,7 +11,7 @@ import time
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Optional
 
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -44,6 +44,7 @@ from src.prediction.difficulty import DifficultyEstimator
 from src.reports.student_report import StudentReportGenerator
 from src.reports.examiner_report import ExaminerReportGenerator
 from src.reports.evidence import EvidenceLog, EvidenceSeverity
+from src.database.db import Database, DB_PATH
 from src.utils.config import load_config
 
 # ── App setup ────────────────────────────────────────────────────────────────
@@ -62,6 +63,17 @@ _knowledge_tracers: Dict[str, KnowledgeTracer] = {}
 _performance_predictors: Dict[str, PerformancePredictor] = {}
 _difficulty_estimators: Dict[str, DifficultyEstimator] = {}
 _grading_orchestrator = GradingOrchestrator()
+# Training metadata — tracks actual training events, not fake status
+_training_records: List[Dict] = []
+_db_instance: Optional[Database] = None
+
+
+def _get_db() -> Database:
+    """Get or create the database instance (lazy singleton)."""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = Database(DB_PATH)
+    return _db_instance
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -214,11 +226,25 @@ def create_exam():
     )
     exam.topic = data.get("topic", "")
     exam.difficulty = data.get("difficulty", "medium")
+
+    # Add questions if provided in the creation request
+    for qd in data.get("questions", []):
+        exam.add_question(
+            qtype=qd.get("type", "mcq"),
+            text=qd.get("text", ""),
+            options=qd.get("options"),
+            correct_answer=qd.get("correct_answer"),
+            marks=float(qd.get("marks", 1.0)),
+            tolerance=float(qd.get("tolerance", 0.01)),
+            keywords=qd.get("keywords", []),
+        )
+
     return jsonify({
         "exam_id": exam.exam_id,
         "title": exam.title,
         "duration_minutes": exam.duration_minutes,
         "question_count": len(exam.questions),
+        "total_marks": sum(q.marks for q in exam.questions),
         "status": "created",
     })
 
@@ -311,6 +337,9 @@ def create_session():
     if not session:
         return jsonify({"error": "Failed to create session"}), 500
 
+    # Capture session creation time before any processing
+    session_created_at = session.created_at if hasattr(session, "created_at") else datetime.now().isoformat()
+
     controller.start_exam()
 
     session_key = f"{student_id}:{exam_id}"
@@ -318,7 +347,9 @@ def create_session():
         "student_id": student_id,
         "exam_id": exam_id,
         "controller": controller,
-        "started_at": datetime.now().isoformat(),
+        "session_id": session.session_id,
+        "created_at": session_created_at,
+        "started_at": session_created_at,
     }
 
     # Initialize proctoring agent for this session
@@ -752,11 +783,11 @@ def student_detail(student_id, exam_id):
         answers = {}
     grading = _grade_session_internal(student_id, exam_id, exam, answers)
 
-    # Build risk timeline from history
+    # Build risk timeline from history — use actual timestamps from entries
     risk_timeline = []
     for h in history:
         risk_timeline.append({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": h.get("timestamp", h.get("created_at", datetime.now().isoformat())),
             "iteration": h.get("iteration"),
             "risk_score": h.get("risk_score"),
             "state": h.get("state"),
@@ -1725,7 +1756,7 @@ def update_knowledge():
 
 @app.route("/api/grading/submit", methods=["POST"])
 def submit_answers():
-    """Submit exam answers for grading."""
+    """Submit exam answers for grading and persist to database."""
     data = request.get_json(force=True)
     student_id = data.get("student_id", "unknown")
     exam_id = data.get("exam_id", "unknown")
@@ -1742,27 +1773,120 @@ def submit_answers():
             ref_answers[q.id] = str(q.correct_answer)
 
     results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+    submitted_at = datetime.now().isoformat()
 
-    return jsonify({
+    # ── Persist to database ──────────────────────────────────────────────────
+    db = None
+    session_id = None
+    persisted = False
+    try:
+        db = _get_db()
+        # Find or create session
+        found_sid = None
+        for s in db.list_sessions(limit=100):
+            if s.get("student_id") == student_id and s.get("exam_id") == exam_id:
+                found_sid = s["session_id"]
+                break
+        if not found_sid:
+            found_sid = db.create_session(student_id, exam_id)
+
+        session_id = found_sid
+
+        # Ensure questions exist in DB
+        existing_qs = {q["question_id"] for q in db.get_questions(found_sid)}
+        for q in exam.questions:
+            if q.id not in existing_qs:
+                db.add_question(
+                    found_sid, q.id, q.type.value, q.text,
+                    marks=q.marks, correct_answer=str(q.correct_answer) if q.correct_answer else None,
+                    keywords=q.keywords, options=q.options,
+                )
+
+        # Record each answer
+        per_question_persisted = {}
+        for q in exam.questions:
+            qid = q.id
+            q_result = results.get("per_question", {}).get(qid, {})
+            student_ans = answers.get(qid, "")
+            score = q_result.get("score", 0.0)
+            max_score = q_result.get("max_score", q.marks)
+            method = q_result.get("method", q.type.value)
+            details = q_result.get("details", {})
+            if isinstance(details, dict):
+                details = {k: v for k, v in details.items() if v is not None}
+
+            db.record_answer(
+                found_sid, qid, student_ans,
+                score=score, max_score=max_score,
+                grading_method=method,
+                grading_details=details,
+            )
+            per_question_persisted[qid] = {
+                "question_id": qid,
+                "student_answer": student_ans,
+                "score": score,
+                "max_score": max_score,
+                "grading_method": method,
+                "persisted": True,
+            }
+        persisted = True
+    except Exception as e:
+        per_question_persisted = {"persistence_error": str(e)}
+
+    response = {
         "student_id": student_id,
         "exam_id": exam_id,
-        "submitted_at": datetime.now().isoformat(),
+        "session_id": session_id,
+        "submitted_at": submitted_at,
         "total_score": results.get("total_score", 0.0),
         "total_max": results.get("total_max", 0.0),
         "percentage": results.get("percentage", 0.0),
         "answers_count": len(answers),
-        "per_question": results.get("per_question", {}),
-    })
+        "persisted": persisted,
+        "per_question": per_question_persisted if persisted else results.get("per_question", {}),
+    }
+    return jsonify(response)
 
 
 @app.route("/api/grading/release/<student_id>/<exam_id>", methods=["POST"])
 def release_grades(student_id, exam_id):
-    """Release grades to students."""
+    """Release grades to students — persists release state to database."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if not user:
         return jsonify({"error": "Unauthorized"}), 401
-    return jsonify({"message": "Grades released", "student_id": student_id, "exam_id": exam_id})
+
+    released_at = datetime.now().isoformat()
+    released_by = user.get("username", user.get("user_id", "unknown"))
+
+    # Persist release state
+    db = None
+    persisted = False
+    session_id = None
+    try:
+        db = _get_db()
+        for s in db.list_sessions(limit=100):
+            if s.get("student_id") == student_id and s.get("exam_id") == exam_id:
+                session_id = s["session_id"]
+                db._conn.execute(
+                    "UPDATE sessions SET state = 'released', ended_at = ? WHERE session_id = ?",
+                    (released_at, session_id),
+                )
+                db._conn.commit()
+                persisted = True
+                break
+    except Exception:
+        pass
+
+    return jsonify({
+        "message": "Grades released",
+        "student_id": student_id,
+        "exam_id": exam_id,
+        "session_id": session_id,
+        "released_at": released_at,
+        "released_by": released_by,
+        "persisted": persisted,
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1785,7 +1909,7 @@ def list_sessions_api():
             "state": status.get("state", "NORMAL"),
             "risk_score": status.get("current_risk", 0.0),
             "iteration": status.get("iteration", 0),
-            "started_at": datetime.now().isoformat(),
+            "started_at": _active_sessions.get(skey, {}).get("created_at", datetime.now().isoformat()),
         })
 
     # Also include database sessions
@@ -1800,7 +1924,7 @@ def list_sessions_api():
                     "exam_id": s.get("exam_id", ""),
                     "state": s.get("state", "normal"),
                     "risk_score": s.get("risk_score", 0.0),
-                    "started_at": s.get("started_at", ""),
+                    "started_at": s.get("created_at", s.get("started_at", "")),
                     "iteration": 0,
                 })
     except Exception:
@@ -1829,27 +1953,27 @@ def analytics_api():
         if status.get("iteration", 0) > 0:
             completed += 1
 
-    # Try to get accuracy from evaluation
-    try:
-        from src.ml.calibration import ModelEvaluator
-        evaluator = ModelEvaluator()
-        summary = evaluator.evaluate_all()
-        if summary and "overall" in summary:
-            accuracy = summary["overall"].get("accuracy", 0.0)
-    except Exception:
-        pass
+    # Build model status from actual training records — never fake it
+    model_status = {}
+    if _training_records:
+        latest = _training_records[-1]
+        for model_name, model_info in latest.get("models", {}).items():
+            model_status[model_name] = model_info
+    else:
+        model_status = {
+            "logistic_regression": {"trained": False, "note": "No training records yet"},
+            "anomaly_detector": {"trained": False, "note": "No training records yet"},
+            "risk_engine": {"active": True, "type": "multi_signal"},
+            "temporal_fusion": {"active": True, "type": "weighted_average"},
+        }
 
     summary = {
         "total_sessions": total_sessions,
         "completed_sessions": completed,
         "flagged_events": flagged,
-        "accuracy": accuracy,
         "active_exams": len(_exam_manager._exams),
-        "model_performance": {
-            "logistic_regression": {"trained": True, "accuracy": accuracy},
-            "anomaly_detector": {"trained": True},
-            "risk_engine": {"active": True},
-        },
+        "model_status": model_status,
+        "training_records_count": len(_training_records),
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -1862,56 +1986,176 @@ def analytics_api():
 
 @app.route("/api/training/train", methods=["POST"])
 def training_train():
-    """Train ML models."""
-    data = request.get_json(force=True) or {}
-    n_normal = data.get("n_normal", 100)
-    n_suspicious = data.get("n_suspicious", 50)
+    """Train ML models with proper train/test split.
 
+    Generates synthetic behavioral data, splits 70/30, trains on train set,
+    evaluates on UNSEEN test set. Reports accuracy, precision, recall, F1.
+    All data is synthetic — labeled as such in results.
+    """
+    data = request.get_json(force=True) or {}
+    n_normal = max(20, int(data.get("n_normal", 100)))
+    n_suspicious = max(20, int(data.get("n_suspicious", 50)))
+    test_ratio = float(data.get("test_ratio", 0.3))
+    max_iterations = int(data.get("max_iterations", 500))
+    learning_rate = float(data.get("learning_rate", 0.1))
+
+    trained_at = datetime.now().isoformat()
+    dataset_size = n_normal + n_suspicious
+    training_record = {
+        "trained_at": trained_at,
+        "dataset_size": dataset_size,
+        "n_normal": n_normal,
+        "n_suspicious": n_suspicious,
+        "test_ratio": test_ratio,
+        "data_source": "SYNTHETIC — generated behavioral feature vectors",
+        "models": {},
+    }
     results = {}
 
     try:
-        # Train logistic regression
-        from src.ml.logistic import LogisticRegressionScratch
+        # ── Step 1: Generate dataset ──────────────────────────────────────────
         from src.ml.training_data import TrainingDataGenerator
         gen = TrainingDataGenerator(seed=42)
-        X, y, _ = gen.generate(n_normal=n_normal, n_suspicious=n_suspicious)
+        X, y = gen.generate_dataset(n_normal=n_normal, n_suspicious=n_suspicious)
+        feature_count = X.shape[1]
 
-        model = LogisticRegressionScratch(learning_rate=0.1, max_iterations=200)
-        model.fit(X, y)
-        proba = model.predict_proba(X)
-        predictions = (proba[:, 1] >= 0.5).astype(int)
-        accuracy = float((predictions == y).mean())
-        results["logistic_regression"] = {"accuracy": round(accuracy, 4), "samples": len(y)}
-    except Exception as e:
-        results["logistic_regression"] = {"error": str(e)}
+        # Class distribution
+        n_class_0 = int((y == 0).sum())
+        n_class_1 = int((y == 1).sum())
 
-    try:
-        # Train anomaly detector
-        from src.ml.anomaly import AnomalyDetector
-        normal = X[y == 0][:min(n_normal, 50)]
-        if len(normal) > 10:
-            detector = AnomalyDetector(method="zscore", threshold=2.5)
-            detector.fit(normal)
-            results["anomaly_detection"] = {"method": "zscore", "trained": True, "normal_samples": len(normal)}
-        else:
-            results["anomaly_detection"] = {"error": "Insufficient normal data"}
+        # ── Step 2: Stratified train/test split ────────────────────────────────
+        X_train, X_test, y_train, y_test = gen.train_test_split(
+            X, y, test_ratio=test_ratio, seed=42
+        )
+
+        # ── Step 3: Train on TRAIN set only ──────────────────────────────────
+        from src.ml.logistic import LogisticRegressionScratch
+        from src.ml.calibration import ModelEvaluator
+
+        model = LogisticRegressionScratch(
+            learning_rate=learning_rate,
+            max_iterations=max_iterations,
+        )
+        model.fit(X_train, y_train)
+
+        # ── Step 4: Evaluate on UNSEEN test set ───────────────────────────────
+        proba_test = model.predict_proba(X_test)
+        predictions_test = (proba_test >= 0.5).astype(int)
+
+        evaluator = ModelEvaluator()
+        metrics = evaluator.evaluate_classifier(y_test, predictions_test, proba_test)
+
+        results["logistic_regression"] = {
+            "status": "trained",
+            "data_source": "SYNTHETIC",
+            "disclaimer": "NOT REPRESENTATIVE OF REAL-WORLD CHEATING DETECTION",
+            "dataset": {
+                "total_samples": dataset_size,
+                "feature_count": feature_count,
+                "class_distribution": {"normal": n_class_0, "suspicious": n_class_1},
+                "train_size": len(y_train),
+                "test_size": len(y_test),
+                "split_ratio": f"{int((1-test_ratio)*100)}/{int(test_ratio*100)}",
+            },
+            "training": {
+                "learning_rate": learning_rate,
+                "max_iterations": max_iterations,
+                "regularization": model.regularization,
+                "loss_history_length": len(model.loss_history),
+                "final_loss": round(model.loss_history[-1], 6) if model.loss_history else None,
+            },
+            "test_metrics": {
+                "accuracy": round(metrics["accuracy"], 4),
+                "precision": round(metrics["precision"], 4),
+                "recall": round(metrics["recall"], 4),
+                "f1": round(metrics["f1"], 4),
+                "roc_auc": round(metrics["roc_auc"], 4),
+                "confusion_matrix": metrics["confusion_matrix"],
+            },
+        }
+
+        training_record["models"]["logistic_regression"] = {
+            "status": "trained",
+            "test_accuracy": round(metrics["accuracy"], 4),
+            "test_f1": round(metrics["f1"], 4),
+            "feature_count": feature_count,
+        }
+
+        # ── Step 5: Anomaly detector on normal training samples ───────────────
+        try:
+            from src.ml.anomaly import AnomalyDetector
+            normal_train = X_train[y_train == 0]
+            if len(normal_train) > 10:
+                detector = AnomalyDetector(method="zscore", threshold=2.5)
+                detector.fit(normal_train)
+
+                # Evaluate: how many test normal samples are flagged as anomalous?
+                normal_test = X_test[y_test == 0]
+                anomalous_count = 0
+                total_tested = 0
+                if len(normal_test) > 0:
+                    normal_scores = detector.score(normal_test)
+                    anomalous_count = int((normal_scores > 2.5).sum())
+                    total_tested = len(normal_scores)
+
+                results["anomaly_detection"] = {
+                    "status": "trained",
+                    "method": "zscore",
+                    "data_source": "SYNTHETIC",
+                    "disclaimer": "NOT REPRESENTATIVE OF REAL-WORLD CHEATING DETECTION",
+                    "normal_training_samples": len(normal_train),
+                    "normal_test_samples": total_tested,
+                    "anomalous_flags_in_normal": anomalous_count,
+                    "false_positive_rate_on_normal": round(anomalous_count / total_tested, 4) if total_tested > 0 else 0.0,
+                }
+
+                training_record["models"]["anomaly_detection"] = {
+                    "status": "trained",
+                    "method": "zscore",
+                    "normal_training_samples": len(normal_train),
+                }
+            else:
+                results["anomaly_detection"] = {"status": "skipped", "reason": "Insufficient normal training data"}
+        except Exception as e:
+            results["anomaly_detection"] = {"status": "error", "error": str(e)}
+
     except Exception as e:
-        results["anomaly_detection"] = {"error": str(e)}
+        results["error"] = str(e)
+        training_record["error"] = str(e)
+
+    # Persist training record
+    _training_records.append(training_record)
+
+    results["training_record_id"] = len(_training_records)
+    results["trained_at"] = trained_at
 
     return jsonify(results)
 
 
 @app.route("/api/training/status", methods=["GET"])
 def training_status():
-    """Get model training status."""
+    """Get actual model training status from persisted records.
+
+    Never returns fabricated 'trained: True' without real training records.
+    """
+    model_status = {}
+    if _training_records:
+        latest = _training_records[-1]
+        for model_name, model_info in latest.get("models", {}).items():
+            model_status[model_name] = model_info
+    else:
+        model_status = {
+            "logistic_regression": {"trained": False, "note": "No training records yet"},
+            "anomaly_detector": {"trained": False, "note": "No training records yet"},
+            "risk_engine": {"active": True, "type": "multi_signal"},
+            "temporal_fusion": {"active": True, "type": "weighted_average"},
+        }
+
     return jsonify({
-        "models": {
-            "logistic_regression": {"trained": True, "samples": 150},
-            "anomaly_detector": {"trained": True, "samples": 100},
-            "risk_engine": {"trained": True, "type": "multi_signal"},
-            "temporal_fusion": {"trained": False, "type": "weighted_average"},
-        },
-        "last_trained": datetime.now().isoformat(),
+        "models": model_status,
+        "training_records_count": len(_training_records),
+        "last_trained_at": _training_records[-1]["trained_at"] if _training_records else None,
+        "data_source": "SYNTHETIC — generated behavioral feature vectors",
     })
 
 

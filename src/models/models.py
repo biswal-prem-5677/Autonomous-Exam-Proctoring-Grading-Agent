@@ -70,7 +70,8 @@ class Exam:
 
     def add_question(self, qtype: str, text: str, **kwargs):
         """Add a question to the exam."""
-        # Extract fields that belong on Exam, not Question
+        # Normalize type string: handle mixed-case inputs from frontend
+        qtype_normalized = qtype.strip().lower().replace(" ", "_")
         meta = kwargs.pop("metadata", {})
         for key in ("topic", "difficulty"):
             if key in kwargs:
@@ -81,7 +82,7 @@ class Exam:
             kwargs["metadata"] = meta
         q = Question(
             id=f"q{len(self.questions) + 1}",
-            type=QuestionType(qtype),
+            type=QuestionType(qtype_normalized),
             text=text,
             **kwargs
         )
