@@ -7,9 +7,11 @@
     <title>{% block title %}Exam Proctoring Agent{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+    {% block styles %}{% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
 <body>
+    {% block content %}{% endblock %}
     {% block body %}{% endblock %}
 
     <script src="/static/js/app.js"></script>

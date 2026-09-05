@@ -13,6 +13,7 @@
     --text-secondary: #94a3b8;
     --text-muted: #64748b;
     --accent: #3b82f6;
+    --accent-primary: #22d3ee;
     --accent-hover: #2563eb;
     --accent-light: rgba(59, 130, 246, 0.15);
     --success: #10b981;
@@ -23,11 +24,20 @@
     --danger-bg: rgba(239, 68, 68, 0.1);
     --info: #06b6d4;
     --radius: 8px;
+    --radius-md: 8px;
     --radius-lg: 12px;
     --shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
     --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4);
+    --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.15);
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
     --transition: all 0.2s ease;
+    --transition-base: all 0.2s ease;
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --border-color: #1e2d3d;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
