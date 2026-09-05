@@ -133,6 +133,11 @@
         </div>
     </div>
 
+    <script src="/static/js/app.js"></script>
+    <script>
+        App.currentUser = App.currentUser || {};
+        App.authToken = App.authToken || "";
+    </script>
     <script>
     // ─── State ───────────────────────────────────────────────────────────────
 
@@ -173,11 +178,14 @@
         // Run preflight via API
         try {
             const result = await App.apiPost('/api/preflight', {
-                require_webcam: true,
+                require_webcam: false,      // Camera is best-effort, not blocking
+                require_microphone: false,
                 lock_fullscreen: false,
                 camera_available: checks.camera_available,
                 online: checks.online,
                 browser_capabilities: checks.browser_capabilities,
+                exam_id: examId,
+                student_id: studentId,
             });
 
             const container = document.getElementById('preflight-checks');
@@ -214,19 +222,17 @@
         // Load exam details
         try {
             const examInfo = await App.apiGet(`/api/exams/${examId}`);
-            if (examInfo.exam) {
-                examData = examInfo.exam;
-                document.getElementById('exam-title').textContent = examData.title || 'Exam';
-                document.getElementById('exam-topic').textContent = examData.topic || '';
-                document.getElementById('active-exam-title').textContent = examData.title || 'Exam';
-                if (examData.questions) {
-                    questions = examData.questions;
-                }
-                const settings = examInfo.settings || {};
-                document.getElementById('instructions-text').textContent = settings.instructions || 'Complete all questions. Do not communicate with others.';
+            examData = examInfo;
+            document.getElementById('exam-title').textContent = examData.title || 'Exam';
+            document.getElementById('exam-topic').textContent = examData.topic || '';
+            document.getElementById('active-exam-title').textContent = examData.title || 'Exam';
+            if (examData.questions && examData.questions.length > 0) {
+                questions = examData.questions;
             }
+            document.getElementById('instructions-text').textContent =
+                'Complete all questions. Do not communicate with others or use unauthorized aids.';
         } catch (e) {
-            document.getElementById('exam-title').textContent = 'Exam';
+            document.getElementById('exam-title').textContent = 'Exam (offline mode)';
         }
 
         App.startExamSession(studentId, examId);
