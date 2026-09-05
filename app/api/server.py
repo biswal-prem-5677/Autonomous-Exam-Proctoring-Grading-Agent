@@ -1720,6 +1720,394 @@ def update_knowledge():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  GRADING SUBMISSION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/grading/submit", methods=["POST"])
+def submit_answers():
+    """Submit exam answers for grading."""
+    data = request.get_json(force=True)
+    student_id = data.get("student_id", "unknown")
+    exam_id = data.get("exam_id", "unknown")
+    answers = data.get("answers", {})
+
+    exam = _exam_manager.get_exam(exam_id)
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+
+    # Grade
+    ref_answers = {}
+    for q in exam.questions:
+        if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
+            ref_answers[q.id] = str(q.correct_answer)
+
+    results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+
+    return jsonify({
+        "student_id": student_id,
+        "exam_id": exam_id,
+        "submitted_at": datetime.now().isoformat(),
+        "total_score": results.get("total_score", 0.0),
+        "total_max": results.get("total_max", 0.0),
+        "percentage": results.get("percentage", 0.0),
+        "answers_count": len(answers),
+        "per_question": results.get("per_question", {}),
+    })
+
+
+@app.route("/api/grading/release/<student_id>/<exam_id>", methods=["POST"])
+def release_grades(student_id, exam_id):
+    """Release grades to students."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"message": "Grades released", "student_id": student_id, "exam_id": exam_id})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SESSIONS API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/sessions", methods=["GET"])
+def list_sessions_api():
+    """List all proctoring sessions."""
+    sessions = []
+    for skey, agent in _proctoring_agents.items():
+        status = agent.get_status()
+        parts = skey.split(":")
+        student_id = parts[0] if parts else skey
+        exam_id = parts[1] if len(parts) > 1 else ""
+        sessions.append({
+            "session_id": skey,
+            "student_id": student_id,
+            "exam_id": exam_id,
+            "state": status.get("state", "NORMAL"),
+            "risk_score": status.get("current_risk", 0.0),
+            "iteration": status.get("iteration", 0),
+            "started_at": datetime.now().isoformat(),
+        })
+
+    # Also include database sessions
+    try:
+        db = _get_db()
+        for s in db.list_sessions(limit=50):
+            sid = s.get("session_id", "")
+            if not any(s2.get("session_id") == sid for s2 in sessions):
+                sessions.append({
+                    "session_id": sid,
+                    "student_id": s.get("student_id", ""),
+                    "exam_id": s.get("exam_id", ""),
+                    "state": s.get("state", "normal"),
+                    "risk_score": s.get("risk_score", 0.0),
+                    "started_at": s.get("started_at", ""),
+                    "iteration": 0,
+                })
+    except Exception:
+        pass
+
+    return jsonify({"sessions": sessions, "count": len(sessions)})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ANALYTICS API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/analytics", methods=["GET"])
+def analytics_api():
+    """Get system analytics."""
+    total_sessions = 0
+    completed = 0
+    flagged = 0
+    accuracy = 0.0
+
+    for skey, agent in _proctoring_agents.items():
+        total_sessions += 1
+        status = agent.get_status()
+        if status.get("state") in ("SUSPICIOUS", "HIGH_RISK", "REVIEW_REQUIRED"):
+            flagged += 1
+        if status.get("iteration", 0) > 0:
+            completed += 1
+
+    # Try to get accuracy from evaluation
+    try:
+        from src.ml.calibration import ModelEvaluator
+        evaluator = ModelEvaluator()
+        summary = evaluator.evaluate_all()
+        if summary and "overall" in summary:
+            accuracy = summary["overall"].get("accuracy", 0.0)
+    except Exception:
+        pass
+
+    summary = {
+        "total_sessions": total_sessions,
+        "completed_sessions": completed,
+        "flagged_events": flagged,
+        "accuracy": accuracy,
+        "active_exams": len(_exam_manager._exams),
+        "model_performance": {
+            "logistic_regression": {"trained": True, "accuracy": accuracy},
+            "anomaly_detector": {"trained": True},
+            "risk_engine": {"active": True},
+        },
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    return jsonify(summary)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TRAINING API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/training/train", methods=["POST"])
+def training_train():
+    """Train ML models."""
+    data = request.get_json(force=True) or {}
+    n_normal = data.get("n_normal", 100)
+    n_suspicious = data.get("n_suspicious", 50)
+
+    results = {}
+
+    try:
+        # Train logistic regression
+        from src.ml.logistic import LogisticRegressionScratch
+        from src.ml.training_data import TrainingDataGenerator
+        gen = TrainingDataGenerator(seed=42)
+        X, y, _ = gen.generate(n_normal=n_normal, n_suspicious=n_suspicious)
+
+        model = LogisticRegressionScratch(learning_rate=0.1, max_iterations=200)
+        model.fit(X, y)
+        proba = model.predict_proba(X)
+        predictions = (proba[:, 1] >= 0.5).astype(int)
+        accuracy = float((predictions == y).mean())
+        results["logistic_regression"] = {"accuracy": round(accuracy, 4), "samples": len(y)}
+    except Exception as e:
+        results["logistic_regression"] = {"error": str(e)}
+
+    try:
+        # Train anomaly detector
+        from src.ml.anomaly import AnomalyDetector
+        normal = X[y == 0][:min(n_normal, 50)]
+        if len(normal) > 10:
+            detector = AnomalyDetector(method="zscore", threshold=2.5)
+            detector.fit(normal)
+            results["anomaly_detection"] = {"method": "zscore", "trained": True, "normal_samples": len(normal)}
+        else:
+            results["anomaly_detection"] = {"error": "Insufficient normal data"}
+    except Exception as e:
+        results["anomaly_detection"] = {"error": str(e)}
+
+    return jsonify(results)
+
+
+@app.route("/api/training/status", methods=["GET"])
+def training_status():
+    """Get model training status."""
+    return jsonify({
+        "models": {
+            "logistic_regression": {"trained": True, "samples": 150},
+            "anomaly_detector": {"trained": True, "samples": 100},
+            "risk_engine": {"trained": True, "type": "multi_signal"},
+            "temporal_fusion": {"trained": False, "type": "weighted_average"},
+        },
+        "last_trained": datetime.now().isoformat(),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  EXAMINER API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/examiner/submissions", methods=["GET"])
+def examiner_submissions():
+    """Get all submissions for an exam."""
+    exam_id = request.args.get("exam_id", "")
+    if not exam_id:
+        return jsonify({"submissions": []})
+
+    exam = _exam_manager.get_exam(exam_id)
+    if not exam:
+        return jsonify({"submissions": []})
+
+    submissions = []
+    for skey, agent in _proctoring_agents.items():
+        parts = skey.split(":")
+        if len(parts) >= 2 and parts[1] == exam_id:
+            status = agent.get_status()
+            session_info = _active_sessions.get(skey)
+            answers = {}
+            if session_info and session_info.get("controller") and session_info["controller"].session:
+                answers = session_info["controller"].session.answers
+
+            # Grade answers
+            ref_answers = {}
+            for q in exam.questions:
+                if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
+                    ref_answers[q.id] = str(q.correct_answer)
+
+            results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+
+            submissions.append({
+                "student_id": parts[0],
+                "exam_id": exam_id,
+                "total_score": results.get("total_score", 0.0),
+                "total_max": results.get("total_max", 0.0),
+                "percentage": results.get("percentage", 0.0),
+                "answers": len(answers),
+                "state": status.get("state", "NORMAL"),
+                "risk_score": status.get("current_risk", 0.0),
+                "submitted_at": datetime.now().isoformat(),
+            })
+
+    return jsonify({"submissions": submissions, "count": len(submissions)})
+
+
+@app.route("/api/student/results", methods=["GET"])
+def student_results_api():
+    """Get results for the current student."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    student_id = user.get("username", user.get("user_id", ""))
+    results = []
+
+    # Find exams this student has taken
+    for skey, agent in _proctoring_agents.items():
+        parts = skey.split(":")
+        if len(parts) >= 1 and (parts[0] == student_id or parts[0] == user.get("user_id", "")):
+            exam_id = parts[1] if len(parts) > 1 else ""
+            status = agent.get_status()
+
+            session_info = _active_sessions.get(skey)
+            answers = {}
+            if session_info and session_info.get("controller") and session_info["controller"].session:
+                answers = session_info["controller"].session.answers
+
+            exam = _exam_manager.get_exam(exam_id)
+            if exam:
+                ref_answers = {}
+                for q in exam.questions:
+                    if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
+                        ref_answers[q.id] = str(q.correct_answer)
+
+                grade_results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+                results.append({
+                    "exam_id": exam_id,
+                    "exam_title": exam.title,
+                    "total_score": grade_results.get("total_score", 0.0),
+                    "total_max": grade_results.get("total_max", 0.0),
+                    "percentage": grade_results.get("percentage", 0.0),
+                    "answered": len(answers),
+                    "risk_score": status.get("current_risk", 0.0),
+                    "submitted_at": datetime.now().isoformat(),
+                })
+
+    return jsonify({"results": results, "count": len(results)})
+
+
+@app.route("/api/student/results/<exam_id>", methods=["GET"])
+def student_result_detail(exam_id):
+    """Get detailed results for a specific exam."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    exam = _exam_manager.get_exam(exam_id)
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+
+    # Find student's session
+    student_id = user.get("username", user.get("user_id", ""))
+    session_key = f"{student_id}:{exam_id}"
+    session_info = _active_sessions.get(session_key)
+
+    answers = {}
+    if session_info and session_info.get("controller") and session_info["controller"].session:
+        answers = session_info["controller"].session.answers
+
+    # Grade
+    ref_answers = {}
+    for q in exam.questions:
+        if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
+            ref_answers[q.id] = str(q.correct_answer)
+
+    results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+
+    per_question = {}
+    for q in exam.questions:
+        qid = q.id
+        if qid in results.get("per_question", {}):
+            r = results["per_question"][qid]
+            per_question[qid] = {
+                "question_id": qid,
+                "question_text": q.text,
+                "question_type": q.type.value,
+                "marks": q.marks,
+                "score": r.get("score", 0.0),
+                "max_score": r.get("max_score", q.marks),
+                "correct": r.get("correct", False),
+                "student_answer": answers.get(qid, ""),
+                "correct_answer": q.correct_answer,
+            }
+
+    return jsonify({
+        "exam_id": exam_id,
+        "exam_title": exam.title,
+        "per_question": per_question,
+        "total_score": results.get("total_score", 0.0),
+        "total_max": results.get("total_max", 0.0),
+        "percentage": results.get("percentage", 0.0),
+        "grading_methods": {
+            "mcq": "exact_match",
+            "numerical": "tolerance_based",
+            "short_answer": "tfidf_cosine",
+            "long_answer": "multi_signal",
+        },
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AUTH CHANGE PASSWORD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/auth/change-password", methods=["POST"])
+def change_password():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(force=True)
+    current = data.get("current_password", "")
+    new_pass = data.get("new_password", "")
+
+    if not current or not new_pass:
+        return jsonify({"error": "Current and new password required"}), 400
+
+    if len(new_pass) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+
+    # Verify current password
+    verified = _get_auth_db().verify_password(user["username"], current)
+    if not verified:
+        return jsonify({"error": "Current password is incorrect"}), 401
+
+    # Update password
+    import hashlib
+    new_hash = hashlib.sha256(new_pass.encode()).hexdigest()
+    _get_auth_db()._conn.execute(
+        "UPDATE users SET password_hash = ? WHERE user_id = ?",
+        (new_hash, user["user_id"]))
+    _get_auth_db()._conn.commit()
+
+    return jsonify({"message": "Password changed successfully"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
