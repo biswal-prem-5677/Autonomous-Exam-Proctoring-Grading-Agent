@@ -99,6 +99,46 @@
                     </div>
                 </div>
 
+                <!-- Agent Risk Analysis Panel -->
+                <div class="card mt-2" id="risk-analysis-panel" style="display:none;">
+                    <div class="card-header">
+                        <div class="card-title">&#x1F9E0; Integrity Analysis</div>
+                        <span class="status-badge neutral" id="agent-state-badge">NORMAL</span>
+                    </div>
+                    <div class="grid-3 mt-1" style="gap:16px;">
+                        <!-- Risk Score -->
+                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:14px;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;">Risk Score</div>
+                            <div style="font-size:28px;font-weight:800;" id="trace-risk-score">0<span style="font-size:14px;font-weight:400;color:var(--text-muted);">/100</span></div>
+                            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Previous: <span id="trace-prev-risk">0</span></div>
+                        </div>
+                        <!-- Confidence -->
+                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:14px;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;">Confidence</div>
+                            <div style="font-size:28px;font-weight:800;" id="trace-confidence">--<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span></div>
+                            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Corroboration: <span id="trace-corroboration">0</span> modalities</div>
+                        </div>
+                        <!-- Agent State -->
+                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:14px;">
+                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;">Agent Decision</div>
+                            <div style="font-size:20px;font-weight:700;" id="trace-decision">NORMAL</div>
+                            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Uncertainty: <span id="trace-uncertainty">LOW</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Evidence Contributions -->
+                    <div id="trace-contributions" style="margin-top:14px;display:none;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Evidence Contributions</div>
+                        <div id="contributions-list"></div>
+                    </div>
+
+                    <!-- Corroboration Timeline -->
+                    <div id="trace-corrob" style="margin-top:14px;display:none;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Cross-Modal Corroboration</div>
+                        <div id="corrob-timeline" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+                    </div>
+                </div>
+
                 <!-- Question Area -->
                 <div class="card">
                     <div class="card-header">
@@ -410,10 +450,12 @@
     function startProctoring() {
         proctoringInterval = setInterval(async () => {
             await runProctoringCheck();
+            await loadAgentTrace();
         }, 5000);
 
         // Run first check immediately
         setTimeout(runProctoringCheck, 1000);
+        setTimeout(loadAgentTrace, 1200);
     }
 
     async function runProctoringCheck() {
@@ -514,6 +556,142 @@
         if (bar) { bar.className = 'risk-fill ' + cls; }
         if (label) { label.textContent = cls.replace('critical', 'Critical').replace('high', 'High').replace('medium', 'Medium'); label.style.color = color; }
     }
+
+    async function loadAgentTrace() {
+        try {
+            const resp = await App.apiGet('/api/agent/status');
+            const panel = document.getElementById('risk-analysis-panel');
+            if (!panel) return;
+
+            const risk = resp.current_risk || 0;
+            const state = resp.state || 'NORMAL';
+            const iteration = resp.iteration || 0;
+
+            panel.style.display = 'block';
+
+            // State badge
+            const badge = document.getElementById('agent-state-badge');
+            if (badge) {
+                badge.textContent = state;
+                const stateCls = state === 'NORMAL' || state === 'LOW_CONCERN' ? 'success'
+                    : state === 'MONITOR' || state === 'TECHNICAL_EVENT' ? 'warning'
+                    : 'danger';
+                badge.className = 'status-badge ' + stateCls;
+                document.getElementById('trace-decision').textContent = state.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            }
+
+            // Risk score
+            const pct = Math.round(risk * 100);
+            document.getElementById('trace-risk-score').innerHTML = pct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">/100</span>';
+
+            // Uncertainty mapping
+            const uncertaintyMap = {
+                'NORMAL': 'LOW', 'LOW_CONCERN': 'LOW', 'MONITOR': 'MEDIUM',
+                'SUSPICIOUS': 'MEDIUM', 'HIGH_RISK': 'HIGH', 'REVIEW_REQUIRED': 'HIGH',
+                'TECHNICAL_EVENT': 'LOW', 'INSUFFICIENT_EVIDENCE': 'HIGH'
+            };
+            document.getElementById('trace-uncertainty').textContent = uncertaintyMap[state] || 'MEDIUM';
+
+            // Load history for corroboration + contributions
+            const historyResp = await App.apiGet('/api/agent/history');
+            const history = historyResp.history || [];
+            if (history.length > 0) {
+                const last = history[history.length - 1];
+                const prevRisk = history.length > 1 ? Math.round(history[history.length - 2].risk_score * 100) : 0;
+                document.getElementById('trace-prev-risk').textContent = prevRisk;
+
+                // Confidence from corroboration
+                const events = last.events_detected || [];
+                const modalities = new Set(events.map(e => {
+                    const t = (e.type || '').toLowerCase();
+                    if (t.includes('face') || t.includes('gaze') || t.includes('head')) return 'vision';
+                    if (t.includes('audio') || t.includes('speech') || t.includes('sound')) return 'audio';
+                    if (t.includes('key') || t.includes('typing')) return 'keyboard';
+                    if (t.includes('mouse') || t.includes('click')) return 'mouse';
+                    if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen') || t.includes('window') || t.includes('focus')) return 'browser';
+                    return 'other';
+                }));
+                const modalityCount = modalities.size || 1;
+                const corroborationScores = { 1: 45, 2: 62, 3: 78, 4: 87, 5: 93, 6: 97 };
+                const confPct = corroborationScores[Math.min(modalityCount, 6)] || 45;
+                document.getElementById('trace-confidence').innerHTML = confPct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span>';
+                document.getElementById('trace-corroboration').textContent = modalityCount;
+
+                // Render contributions
+                renderContributions(events);
+                renderCorroboration(events);
+            }
+        } catch (e) {
+            // Agent not running, hide panel
+            const panel = document.getElementById('risk-analysis-panel');
+            if (panel) panel.style.display = 'none';
+        }
+    }
+
+    function renderContributions(events) {
+        const container = document.getElementById('trace-contributions');
+        const list = document.getElementById('contributions-list');
+        if (!container || !list || events.length === 0) return;
+        container.style.display = 'block';
+
+        const modalityColors = {
+            vision: '#3b82f6', audio: '#8b5cf6', keyboard: '#10b981',
+            mouse: '#f59e0b', browser: '#ef4444', other: '#6b7280'
+        };
+        const modalityNames = {
+            face_absent: 'Vision', multiple_faces: 'Vision', head_turned: 'Vision', gaze_away: 'Vision',
+            speech_detected: 'Audio', loud_audio: 'Audio',
+            copy_paste: 'Keyboard', paste_detected: 'Keyboard', rapid_typing: 'Keyboard',
+            rapid_movement: 'Mouse', idle_mouse: 'Mouse', right_click_spam: 'Mouse',
+            tab_switch: 'Browser', window_blur: 'Browser', fullscreen_exit: 'Browser',
+        };
+        const severityMap = {
+            face_absent: 30, multiple_faces: 50, head_turned: 20, gaze_away: 15,
+            speech_detected: 25, loud_audio: 20,
+            tab_switch: 25, window_blur: 15, fullscreen_exit: 35,
+            copy_paste: 35, paste_detected: 30,
+        };
+
+        list.innerHTML = events.map(e => {
+            const t = e.type || 'unknown';
+            const sev = severityMap[t] || 20;
+            const mod = modalityNames[t] || 'Other';
+            const color = modalityColors[Object.keys(modalityNames).find(k => t.includes(k))] || modalityColors.other;
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+                <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:13px;font-weight:500;">${t.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</div>
+                    <div style="font-size:11px;color:var(--text-muted);">${mod}</div>
+                </div>
+                <div style="font-size:13px;font-weight:600;color:var(--danger);">+${sev}%</div>
+            </div>`;
+        }).join('');
+    }
+
+    function renderCorroboration(events) {
+        const container = document.getElementById('trace-corrob');
+        const timeline = document.getElementById('corrob-timeline');
+        if (!container || !timeline || events.length === 0) return;
+        container.style.display = 'block';
+
+        const modColors = { vision: '#3b82f6', audio: '#8b5cf6', keyboard: '#10b981', mouse: '#f59e0b', browser: '#ef4444' };
+        const modKey = { face_absent: 'vision', multiple_faces: 'vision', head_turned: 'vision', gaze_away: 'vision',
+            speech_detected: 'audio', loud_audio: 'audio',
+            tab_switch: 'browser', window_blur: 'browser', fullscreen_exit: 'browser',
+            copy_paste: 'keyboard', paste_detected: 'keyboard', rapid_typing: 'keyboard' };
+
+        timeline.innerHTML = events.slice(0, 8).map(e => {
+            const key = modKey[e.type] || 'other';
+            const color = modColors[key] || '#6b7280';
+            const label = (e.type || '').replace(/_/g, ' ').split(' ')[0].toUpperCase();
+            return `<div style="display:flex;align-items:center;gap:4px;background:${color}20;border:1px solid ${color}40;border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;">
+                <div style="width:6px;height:6px;border-radius:50%;background:${color};"></div>
+                <span style="color:${color};font-weight:600;">${label}</span>
+            </div>`;
+        }).join('') + (events.length > 8 ? `<span style="font-size:11px;color:var(--text-muted);">+${events.length - 8} more</span>` : '');
+    }
+
+    // Keep existing addProctoringEvent below
 
     function addProctoringEvent(title, type, detail) {
         proctoringEvents.push({ title, type, detail, time: new Date() });

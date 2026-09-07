@@ -81,12 +81,31 @@
             <div class="card mt-2">
                 <div class="card-header">
                     <div class="card-title">&#x1F6E1;&#xFE0F; Active Sessions</div>
-                    <button class="btn btn-sm btn-secondary" onclick="loadMonitorSessions()">&#x1F504; Refresh</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-sm btn-secondary" onclick="showMonitorTab('sessions')">&#x1F4CB; Sessions</button>
+                        <button class="btn btn-sm btn-secondary" onclick="showMonitorTab('evidence')">&#x1F9E0; Reasoning</button>
+                        <button class="btn btn-sm btn-secondary" onclick="loadMonitorSessions()">&#x1F504; Refresh</button>
+                    </div>
                 </div>
-                <div id="monitor-sessions">
-                    <div class="empty-state">
-                        <div class="icon">&#x1F6E1;&#xFE0F;</div>
-                        <h3>Loading sessions...</h3>
+
+                <!-- Sessions Tab -->
+                <div id="monitor-sessions-view">
+                    <div id="monitor-sessions">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F6E1;&#xFE0F;</div>
+                            <h3>Loading sessions...</h3>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Evidence/Reasoning Tab -->
+                <div id="monitor-evidence-view" style="display:none;">
+                    <div id="monitor-reasoning">
+                        <div class="empty-state">
+                            <div class="icon">&#x1F9E0;</div>
+                            <h3>Select a session to view reasoning trace</h3>
+                            <p style="color:var(--text-muted);font-size:13px;">Click on a session in the Sessions tab to see the integrity decision trace.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -128,8 +147,9 @@
                 const riskPct = Math.round(risk * 100);
                 const state = s.state || 'normal';
                 const stateClass = state === 'normal' ? 'success' : state === 'suspicious' ? 'warning' : 'danger';
+                const sk = s.session_key || s.session_id || '';
 
-                return `<div class="evidence-item">
+                return `<div class="evidence-item" style="cursor:pointer;" onclick="showMonitorTab('evidence');document.getElementById('mon-reasoning-session')&&loadReasoningTrace('${sk}');">
                     <div class="evidence-icon ${state === 'normal' ? 'info' : 'warning'}">
                         ${state === 'normal' ? '&#x2705;' : '&#x26A0;&#xFE0F;'}
                     </div>
@@ -152,7 +172,147 @@
     }
 
     function showMonitorTab(tab) {
-        // Simple tab handling
+        document.getElementById('monitor-sessions-view').style.display = tab === 'sessions' ? 'block' : 'none';
+        document.getElementById('monitor-evidence-view').style.display = tab === 'evidence' ? 'block' : 'none';
+        if (tab === 'evidence') {
+            const sel = document.getElementById('mon-reasoning-session');
+            if (sel && sel.value) loadReasoningTrace(sel.value);
+        }
+    }
+
+    async function loadReasoningTrace(sessionKey) {
+        const container = document.getElementById('monitor-reasoning');
+        container.innerHTML = `<div class="empty-state"><div class="icon">&#x23F3;</div><h3>Loading reasoning trace...</h3></div>`;
+
+        try {
+            const [statusResp, historyResp] = await Promise.all([
+                App.apiGet('/api/agent/status?session_key=' + encodeURIComponent(sessionKey)),
+                App.apiGet('/api/agent/history?session_key=' + encodeURIComponent(sessionKey)),
+            ]);
+
+            const state = statusResp.state || 'NORMAL';
+            const risk = statusResp.current_risk || 0;
+            const iterations = statusResp.iteration || 0;
+            const history = historyResp.history || [];
+            const evidenceEvents = statusResp.evidence_events || 0;
+
+            const stateColors = {
+                NORMAL: 'var(--success)', LOW_CONCERN: 'var(--success)', MONITOR: 'var(--warning)',
+                SUSPICIOUS: '#f97316', HIGH_RISK: 'var(--danger)', REVIEW_REQUIRED: 'var(--danger)',
+                TECHNICAL_EVENT: 'var(--warning)', INSUFFICIENT_EVIDENCE: '#f97316'
+            };
+            const color = stateColors[state] || 'var(--text-muted)';
+
+            // Build corroboration data from history
+            let corroborationHtml = '';
+            if (history.length > 0) {
+                const last = history[history.length - 1];
+                const events = last.events_detected || [];
+                const modalities = new Set();
+                events.forEach(e => {
+                    const t = (e.type || '').toLowerCase();
+                    if (t.includes('face') || t.includes('gaze') || t.includes('head')) modalities.add('Vision');
+                    else if (t.includes('audio') || t.includes('speech')) modalities.add('Audio');
+                    else if (t.includes('key') || t.includes('typing')) modalities.add('Keyboard');
+                    else if (t.includes('mouse') || t.includes('click')) modalities.add('Mouse');
+                    else if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen') || t.includes('window') || t.includes('focus')) modalities.add('Browser');
+                    else modalities.add('Other');
+                });
+                const modCount = modalities.size || 1;
+                const confPct = { 1: 45, 2: 62, 3: 78, 4: 87, 5: 93, 6: 97 }[Math.min(modCount, 6)] || 45;
+                corroborationHtml = `
+                    <div class="grid-3 mt-2" style="gap:12px;">
+                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:12px;">
+                            <div style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;">Cross-Modal Confirmation</div>
+                            <div style="font-size:24px;font-weight:700;">${confPct}%</div>
+                            <div style="font-size:12px;color:var(--text-secondary);">${modCount} independent modalities</div>
+                        </div>
+                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:12px;">
+                            <div style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;">Agent Iterations</div>
+                            <div style="font-size:24px;font-weight:700;">${iterations}</div>
+                            <div style="font-size:12px;color:var(--text-secondary);">Evidence events: ${evidenceEvents}</div>
+                        </div>
+                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:12px;">
+                            <div style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;">Decision</div>
+                            <div style="font-size:20px;font-weight:700;color:${color};">${state.replace(/_/g, ' ')}</div>
+                            <div style="font-size:12px;color:var(--text-secondary);">Risk: ${Math.round(risk * 100)}/100</div>
+                        </div>
+                    </div>`;
+            }
+
+            // Build evidence timeline from history
+            let timelineHtml = '';
+            if (history.length > 0) {
+                const recent = history.slice(-10);
+                timelineHtml = `<div style="margin-top:16px;">
+                    <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Decision History (last ${recent.length} iterations)</div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">`;
+
+                recent.forEach((h, i) => {
+                    const evts = (h.events_detected || []).slice(0, 4);
+                    const evtStr = evts.map(e => e.type.replace(/_/g, ' ')).join(', ') || 'None';
+                    const isLast = i === recent.length - 1;
+                    timelineHtml += `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px;background:${isLast ? 'var(--bg-secondary)' : 'transparent'};border-radius:var(--radius-sm);${isLast ? 'border:1px solid var(--border);' : ''}">
+                        <div style="width:24px;height:24px;border-radius:50%;background:${isLast ? 'var(--accent)' : 'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;color:${isLast ? '#fff' : 'var(--text-secondary)'};">${h.iteration}</div>
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;">
+                                <span style="font-size:13px;font-weight:${isLast ? '600' : '400'};">${h.state}</span>
+                                <span style="font-size:12px;color:var(--text-muted);">Risk: ${Math.round((h.risk_score || 0) * 100)}</span>
+                            </div>
+                            <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">${evtStr}</div>
+                        </div>
+                    </div>`;
+                });
+                timelineHtml += '</div></div>';
+            }
+
+            // Build modality breakdown
+            let modalityHtml = '';
+            if (history.length > 0) {
+                const allEvents = history.flatMap(h => h.events_detected || []);
+                const modMap = {};
+                allEvents.forEach(e => {
+                    const t = (e.type || '').toLowerCase();
+                    let mod = 'other';
+                    if (t.includes('face') || t.includes('gaze') || t.includes('head')) mod = 'vision';
+                    else if (t.includes('audio') || t.includes('speech')) mod = 'audio';
+                    else if (t.includes('key') || t.includes('typing')) mod = 'keyboard';
+                    else if (t.includes('mouse') || t.includes('click')) mod = 'mouse';
+                    else if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen') || t.includes('window')) mod = 'browser';
+                    modMap[mod] = (modMap[mod] || 0) + 1;
+                });
+                const entries = Object.entries(modMap).sort((a, b) => b[1] - a[1]);
+                const modColors = { vision: '#3b82f6', audio: '#8b5cf6', keyboard: '#10b981', mouse: '#f59e0b', browser: '#ef4444', other: '#6b7280' };
+                modalityHtml = `<div style="margin-top:14px;">
+                    <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Signal Sources</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">${entries.map(([mod, count]) => {
+                        const c = modColors[mod] || '#6b7280';
+                        const pct = Math.min(100, Math.round((count / Math.max(allEvents.length, 1)) * 100));
+                        return `<div style="flex:1;min-width:120px;background:var(--bg-secondary);border-radius:var(--radius);padding:10px;">
+                            <div style="font-size:12px;color:${c};font-weight:600;text-transform:capitalize;">${mod}</div>
+                            <div style="font-size:18px;font-weight:700;margin-top:4px;">${count} <span style="font-size:11px;color:var(--text-muted);">events</span></div>
+                            <div class="risk-meter mt-1" style="height:4px;"><div class="risk-fill ${pct > 60 ? 'high' : pct > 30 ? 'medium' : 'low'}" style="width:${pct}%;background:${c};"></div></div>
+                        </div>`;
+                    }).join('')}</div>
+                </div>`;
+            }
+
+            container.innerHTML = `
+                <div style="margin-bottom:14px;">
+                    <div style="font-size:16px;font-weight:700;">Integrity Decision Trace</div>
+                    <div style="font-size:13px;color:var(--text-secondary);">Session: ${sessionKey} &middot; Agent state: <strong style="color:${color};">${state.replace(/_/g, ' ')}</strong></div>
+                </div>
+                ${corroborationHtml}
+                ${timelineHtml}
+                ${modalityHtml}
+                <div style="margin-top:14px;padding:12px;background:var(--bg-secondary);border-radius:var(--radius);font-size:12px;color:var(--text-secondary);line-height:1.6;">
+                    <strong>Note:</strong> Risk scores indicate suspicious evidence, not proof of misconduct.
+                    All flagged sessions require human examiner review before any consequence is determined.
+                    This aligns with institutional best practice and system transparency principles.
+                </div>`;
+        } catch (e) {
+            container.innerHTML = `<div class="empty-state"><div class="icon">&#x26A0;&#xFE0F;</div><h3>Could not load reasoning trace</h3><p style="color:var(--text-muted);font-size:13px;">Session may not have an active agent.</p></div>`;
+        }
     }
     </script>
 </body>
