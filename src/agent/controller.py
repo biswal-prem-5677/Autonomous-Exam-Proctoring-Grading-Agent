@@ -13,6 +13,9 @@ from src.features.behavioral import BehavioralFeatureExtractor
 from src.features.temporal import TemporalFeatureAggregator
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
+from src.trace import IntegrityDecisionTrace, EvidenceContribution, CounterfactualResult, build_explainability_trace, build_trace_id
+from src.baseline import StudentBaseline
+from src.context import ExamContext
 
 
 class AgentPhase(Enum):
@@ -76,6 +79,9 @@ class ProctoringAgent:
 
         # History for analysis
         self._history: List[Dict[str, Any]] = []
+
+        # Last decision trace (for explainability)
+        self._last_trace: Optional[Dict[str, Any]] = None
 
     def set_models(self, logistic: LogisticRegressionScratch = None,
                    anomaly: AnomalyDetector = None) -> None:
@@ -160,6 +166,19 @@ class ProctoringAgent:
         # Store history
         self._history.append(result)
 
+        # Build explainability trace
+        try:
+            self._last_trace = build_explainability_trace(
+                session_id=self.session_id,
+                events=events,
+                risk_result=result,
+                risk_engine=self.risk_engine,
+                evidence_memory=self.evidence_memory,
+                agent_state=self._state.value,
+            ).to_dict()
+        except Exception:
+            self._last_trace = None
+
         return result
 
     def get_status(self) -> Dict[str, Any]:
@@ -173,6 +192,10 @@ class ProctoringAgent:
             "current_risk": round(self.evidence_memory.get_current_risk(), 4),
             "history_length": len(self._history),
         }
+
+    def get_last_trace(self) -> Optional[Dict[str, Any]]:
+        """Get the last explainability decision trace."""
+        return self._last_trace
 
     def get_history(self) -> List[Dict[str, Any]]:
         """Get processing history."""

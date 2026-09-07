@@ -664,6 +664,87 @@ def reset_proctor(student_id, exam_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  EXPLAINABILITY & TRACE ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/proctor/trace/<student_id>/<exam_id>", methods=["GET"])
+def proctor_trace(student_id, exam_id):
+    """Get the full explainability decision trace for the last agent cycle."""
+    session_key = f"{student_id}:{exam_id}"
+    agent = _proctoring_agents.get(session_key)
+    if not agent:
+        return jsonify({"error": "No active proctoring agent for this session"}), 404
+
+    trace = agent.get_last_trace()
+    if trace is None:
+        return jsonify({
+            "trace": None,
+            "message": "No trace available yet. Process at least one batch of signals.",
+        })
+
+    return jsonify({"trace": trace})
+
+
+@app.route("/api/proctor/summary/<student_id>/<exam_id>", methods=["GET"])
+def proctor_summary(student_id, exam_id):
+    """Get a lightweight proctoring summary for the examiner dashboard."""
+    session_key = f"{student_id}:{exam_id}"
+    agent = _proctoring_agents.get(session_key)
+    if not agent:
+        return jsonify({
+            "status": "no_agent",
+            "student_id": student_id,
+            "exam_id": exam_id,
+            "risk_score": 0.0,
+            "decision": "INSUFFICIENT_EVIDENCE",
+            "events": [],
+            "contributions": [],
+            "confidence": 0.0,
+        })
+
+    trace = agent.get_last_trace()
+    if trace:
+        return jsonify({
+            "status": "active",
+            "student_id": student_id,
+            "exam_id": exam_id,
+            "risk_score": trace.get("current_risk", 0.0),
+            "previous_risk": trace.get("previous_risk", 0.0),
+            "risk_delta": round(
+                trace.get("current_risk", 0.0) - trace.get("previous_risk", 0.0), 4
+            ),
+            "decision": trace.get("decision"),
+            "decision_reason": trace.get("decision_reason"),
+            "confidence": trace.get("uncertainty", {}).get("confidence", 0.0),
+            "signal_agreement": trace.get("uncertainty", {}).get("signal_agreement", 0),
+            "total_signals": trace.get("uncertainty", {}).get("total_signals", 0),
+            "uncertainty_reason": trace.get("uncertainty", {}).get("reason"),
+            "events": trace.get("events", []),
+            "contributions": trace.get("contributions", []),
+            "counterfactuals": trace.get("counterfactuals", []),
+            "non_contributing": trace.get("non_contributing", []),
+            "corroboration": trace.get("corroboration"),
+            "ml_risk": trace.get("ml_risk"),
+            "anomaly_score": trace.get("anomaly_score"),
+            "trace_id": trace.get("trace_id"),
+            "timestamp": trace.get("timestamp"),
+        })
+
+    # Fallback: build from agent status
+    status = agent.get_status()
+    return jsonify({
+        "status": "active",
+        "student_id": student_id,
+        "exam_id": exam_id,
+        "risk_score": status.get("risk_score", 0.0),
+        "decision": "NORMAL",
+        "confidence": 0.0,
+        "events": [],
+        "contributions": [],
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  EXAMINER DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 
