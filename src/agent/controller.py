@@ -29,9 +29,12 @@ class AgentPhase(Enum):
 class AgentState(Enum):
     """Agent risk states."""
     NORMAL = "NORMAL"
+    MONITOR = "MONITOR"
     SUSPICIOUS = "SUSPICIOUS"
     HIGH_RISK = "HIGH_RISK"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    TECHNICAL_EVENT = "TECHNICAL_EVENT"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 
 class ProctoringAgent:
@@ -322,19 +325,41 @@ class ProctoringAgent:
 
     def _decide(self, risk_score: float,
                 events: List[Dict]) -> AgentState:
-        """DECIDE: Determine agent state based on risk score."""
+        """DECIDE: Determine agent state based on risk score.
+
+        State progression:
+        NORMAL → MONITOR → SUSPICIOUS → HIGH_RISK → REVIEW_REQUIRED
+        TECHNICAL_EVENT for sensor failures (separate from integrity)
+        INSUFFICIENT_EVIDENCE when signals are unreliable
+        """
         thresholds = self.config.get("risk", {})
         escalation = thresholds.get("escalation_threshold", 0.7)
         review = thresholds.get("review_threshold", 0.5)
         multi_signal = thresholds.get("multi_signal_required", 2)
 
+        # Check for technical events first
+        technical_events = [e for e in events
+                           if e.get("type") in (
+                               "camera_disconnected", "audio_unavailable",
+                               "network_interruption", "browser_crash",
+                           )]
+        if technical_events and not events:
+            return AgentState.TECHNICAL_EVENT
+
+        # Check signal quality
+        active_signals = self.evidence_memory.count_active_signals()
+
+        if active_signals == 0 and events:
+            return AgentState.INSUFFICIENT_EVIDENCE
+
         new_state = AgentState.NORMAL
         if risk_score >= escalation:
             new_state = AgentState.HIGH_RISK
         elif risk_score >= review:
-            active_signals = self.evidence_memory.count_active_signals()
             if active_signals >= multi_signal:
                 new_state = AgentState.SUSPICIOUS
+            else:
+                new_state = AgentState.MONITOR
 
         # State transition
         if new_state != self._state:

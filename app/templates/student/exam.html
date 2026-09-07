@@ -424,23 +424,65 @@
         const keyboardStats = { events_per_minute: 0, mean_key_hold: 0, mean_latency: 0, deviation: 0.0 };
         const mouseStats = { avg_speed: 0, total_distance: 0, click_rate: 0, deviation: 0.0 };
 
+        // Capture webcam frame for vision analysis
+        let facePresent = true, faceCount = 1, faceConfidence = 0.9, headPose = { yaw: 0, pitch: 0, roll: 0 };
+        try {
+            const examVideo = document.getElementById('exam-webcam');
+            if (examVideo && examVideo.readyState >= 2) {
+                const canvas = document.createElement('canvas');
+                canvas.width = examVideo.videoWidth || 640;
+                canvas.height = examVideo.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(examVideo, 0, 0);
+                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+
+                const visionResult = await App.apiPost('/api/vision/analyze', {
+                    session_key: App.examSession?.session_key || 'default',
+                    image: imageData,
+                    face_present: true,
+                    face_count: 1,
+                    face_confidence: 0.9,
+                    head_pose: { yaw: 0, pitch: 0, roll: 0 },
+                });
+
+                facePresent = visionResult.face_present;
+                faceCount = visionResult.face_count;
+                faceConfidence = visionResult.face_confidence;
+                headPose = visionResult.head_pose || { yaw: 0 };
+
+                // Update event log with vision events
+                if (visionResult.events && visionResult.events.length > 0) {
+                    visionResult.events.forEach(evt => {
+                        addProctoringEvent(
+                            evt.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                            evt.confidence > 0.7 ? 'danger' : 'warning',
+                            `Confidence: ${Math.round(evt.confidence * 100)}%`
+                        );
+                    });
+                }
+
+                // Update risk display with vision + behavioral combined risk
+                const visionRisk = visionResult.risk_contribution || 0;
+                updateRiskDisplay(visionRisk);
+            }
+        } catch (e) {
+            // Vision analysis failed, continue with behavioral only
+            console.warn('Vision analysis failed:', e.message);
+        }
+
         // Send behavioral analysis
         try {
             const analysis = await App.apiPost('/api/behavioral/analyze', {
                 session_key: App.examSession?.session_key || 'default',
-                face_present: true,
-                face_count: 1,
+                face_present: facePresent,
+                face_count: faceCount,
+                face_confidence: faceConfidence,
+                head_pose: headPose,
                 keyboard: keyboardStats,
                 mouse: mouseStats,
                 browser: browserStats,
                 session_elapsed: elapsed,
             });
-
-            // Update risk display
-            if (analysis.anomaly_score !== undefined) {
-                const risk = analysis.anomaly_score;
-                updateRiskDisplay(risk);
-            }
 
             // Log browser events
             if (browserStats.tab_switches > 0) {

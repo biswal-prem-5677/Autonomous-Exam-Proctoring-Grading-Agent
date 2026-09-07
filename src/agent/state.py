@@ -8,15 +8,22 @@ class AgentStateMachine:
     """State machine for the proctoring agent with valid transitions.
 
     Valid transitions:
-    NORMAL → SUSPICIOUS → HIGH_RISK → REVIEW_REQUIRED
+    NORMAL → MONITOR → SUSPICIOUS → HIGH_RISK → REVIEW_REQUIRED
+    NORMAL → TECHNICAL_EVENT → NORMAL (technical issue resolved)
+    SUSPICIOUS → INSUFFICIENT_EVIDENCE → NORMAL
     Any → NORMAL (reset)
     """
 
     VALID_TRANSITIONS = {
-        AgentState.NORMAL: [AgentState.SUSPICIOUS],
-        AgentState.SUSPICIOUS: [AgentState.NORMAL, AgentState.HIGH_RISK],
-        AgentState.HIGH_RISK: [AgentState.SUSPICIOUS, AgentState.REVIEW_REQUIRED],
+        AgentState.NORMAL: [AgentState.MONITOR, AgentState.TECHNICAL_EVENT,
+                            AgentState.SUSPICIOUS],
+        AgentState.MONITOR: [AgentState.NORMAL, AgentState.SUSPICIOUS],
+        AgentState.SUSPICIOUS: [AgentState.NORMAL, AgentState.HIGH_RISK,
+                               AgentState.INSUFFICIENT_EVIDENCE],
+        AgentState.HIGH_RISK: [AgentState.REVIEW_REQUIRED, AgentState.SUSPICIOUS],
         AgentState.REVIEW_REQUIRED: [AgentState.NORMAL, AgentState.SUSPICIOUS],
+        AgentState.TECHNICAL_EVENT: [AgentState.NORMAL],
+        AgentState.INSUFFICIENT_EVIDENCE: [AgentState.NORMAL, AgentState.MONITOR],
     }
 
     def __init__(self, initial_state: AgentState = AgentState.NORMAL):
