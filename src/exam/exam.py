@@ -127,6 +127,10 @@ class ExamManager:
         """Get an exam by ID."""
         return self._exams.get(exam_id)
 
+    def list_exams(self) -> list:
+        """List all exams."""
+        return list(self._exams.values())
+
     def create_exam(self, exam_id: str, title: str, duration_minutes: int,
                     questions: list) -> object:
         """Create a new exam."""

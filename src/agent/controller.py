@@ -4,7 +4,7 @@ import time
 import uuid
 import threading
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, Tuple
 from enum import Enum
 
 from src.agent.risk import RiskEngine
@@ -13,13 +13,14 @@ from src.features.behavioral import BehavioralFeatureExtractor
 from src.features.temporal import TemporalFeatureAggregator
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
-from src.trace import IntegrityDecisionTrace, EvidenceContribution, CounterfactualResult, build_explainability_trace, build_trace_id
+from src.trace import build_explainability_trace
 from src.trace.audit_chain import AuditChain
 from src.agent.technical import TechnicalEventEngine
 from src.agent.uncertainty import UncertaintyEngine
 from src.agent.counterfactual import CounterfactualEngine
-from src.baseline import StudentBaseline
-from src.context import ExamContext
+from src.baseline import StudentBaseline, BehavioralSample
+from src.context import ExamContext, QuestionContext, get_default_policy, compute_context_weight
+from src.fusion import CrossModalCorroborationEngine
 
 
 class AgentPhase(Enum):
@@ -73,6 +74,13 @@ class ProctoringAgent:
         self.counterfactual_engine = CounterfactualEngine(
             review_threshold=self.config.get("risk", {}).get("review_threshold", 0.50)
         )
+        self.corroboration_engine = CrossModalCorroborationEngine()
+        self.baseline = self.config.get("baseline") or StudentBaseline(
+            student_id=self.config.get("student_id", "student_1")
+        )
+        self.context = self.config.get("context") or ExamContext(
+            policy=self.config.get("policy", get_default_policy("standard"))
+        )
         self.audit_chain = AuditChain(
             db_path=self.config.get("audit_db", "data/audit_chain.db")
         )
@@ -116,6 +124,18 @@ class ProctoringAgent:
         self._on_state_change = on_state_change
         self._on_alert = on_alert
 
+    def set_baseline(self, baseline: StudentBaseline) -> None:
+        """Attach personal student behavioral baseline."""
+        self.baseline = baseline
+
+    def set_context(self, context: ExamContext) -> None:
+        """Attach active exam context & policy."""
+        self.context = context
+
+    def set_question_context(self, question: QuestionContext) -> None:
+        """Update current question context for context-sensitive risk weighting."""
+        self.context.current_question = question
+
     # ── Public API ──────────────────────────────────────────────────────
 
     def start_loop(self) -> None:
@@ -137,7 +157,7 @@ class ProctoringAgent:
             signals: Raw signals from all sensors
 
         Returns:
-            Processing results including risk score and state
+            Processing results including risk score, state, uncertainty, counterfactuals, and baseline
         """
         self._iteration += 1
         result = {
@@ -149,13 +169,42 @@ class ProctoringAgent:
             "events_detected": [],
             "features": None,
             "ml_predictions": {},
+            "uncertainty": None,
+            "counterfactuals": [],
+            "technical_incidents": [],
+            "baseline": {},
         }
 
-        # PHASE 1: OBSERVE — signals arrive as input
+        # PHASE 1: OBSERVE & BASELINE UPDATE
+        # Continually update personal baseline from passive continuous behavioral signals
+        if any(k in signals for k in ("typing_wpm", "mouse_velocity", "face_present_rate", "gaze_off_screen")):
+            sample = BehavioralSample(
+                timestamp=signals.get("detected_at", time.time()),
+                typing_wpm=float(signals.get("typing_wpm", 0.0)),
+                mouse_velocity=float(signals.get("mouse_velocity", 0.0)),
+                mouse_clicks=int(signals.get("mouse_clicks", 0)),
+                face_present=float(signals.get("face_present_rate", 1.0 if signals.get("face_present", True) else 0.0)),
+                face_count=int(signals.get("face_count", 1)),
+                gaze_off_screen_seconds=float(signals.get("gaze_off_screen", 0.0)),
+                pause_duration_seconds=float(signals.get("pause_duration_seconds", 0.0)),
+            )
+            self.baseline.add_sample(sample)
 
         # PHASE 2: PERCEIVE — extract structured events from raw signals
-        events = self._perceive(signals)
+        raw_events = self._perceive(signals)
+
+        # Filter and isolate technical faults from student integrity violations
+        system_diagnostics = {
+            "camera_connected": signals.get("camera_connected", True),
+            "camera_fps": signals.get("camera_fps", 30.0),
+            "network_online": signals.get("network_online", True),
+            "ping_ms": signals.get("ping_ms", 45.0),
+            "mic_active": signals.get("mic_active", True),
+            "cpu_percent": signals.get("cpu_percent", 15.0),
+        }
+        events, technical_incidents = self.technical_engine.analyze_system_state(system_diagnostics, raw_events)
         result["events_detected"] = events
+        result["technical_incidents"] = [t.to_dict() for t in technical_incidents]
 
         # PHASE 3: FEATUREIZE — convert events to feature vector
         features = self._featureize(signals)
@@ -165,20 +214,42 @@ class ProctoringAgent:
         predictions = self._predict(features, signals)
         result["ml_predictions"] = predictions
 
-        # PHASE 5: REASON — combine all evidence
-        evidence_score = self._reason(events, features, predictions)
+        # PHASE 5: REASON — combine evidence, baseline deviations, uncertainty & counterfactuals
+        evidence_score, uncertainty_estimate, counterfactual_analysis = self._reason(
+            events, features, predictions, signals
+        )
         result["risk_score"] = round(evidence_score, 4)
+        result["uncertainty"] = uncertainty_estimate.to_dict() if uncertainty_estimate else None
+        result["counterfactuals"] = [
+            {
+                "factor_id": f.factor_id,
+                "modality": f.modality,
+                "event_type": f.event_type,
+                "risk_without": round(f.risk_without, 4),
+                "marginal_delta": round(f.marginal_delta, 4),
+                "percent_contribution": round(f.percent_contribution, 2),
+                "is_necessary_cause": f.is_necessary_cause,
+                "explanation": f.explanation,
+            }
+            for f in (counterfactual_analysis.factors if counterfactual_analysis else [])
+        ]
+        result["baseline"] = {
+            "maturity": self.baseline.maturity_score(),
+            "is_ready": self.baseline.is_ready(),
+            "max_deviation": round(self.baseline.max_deviation(signals), 4),
+        }
 
-        # PHASE 6: DECIDE — determine state and escalation
-        new_state = self._decide(evidence_score, events)
+        # PHASE 6: DECIDE — determine state, accounting for technical incidents and uncertainty
+        new_state = self._decide(evidence_score, events, uncertainty_estimate, technical_incidents)
         result["state"] = new_state.value
 
-        # PHASE 7: ACT — record evidence, trigger callbacks
-        actions = self._act(events, evidence_score, new_state)
+        # PHASE 7: ACT — record evidence, trigger callbacks, commit to cryptographic audit chain
+        actions = self._act(events, evidence_score, new_state, result)
         result["actions"] = actions
 
         # Update temporal features
-        self.temporal_aggregator.add(features) if features is not None else None
+        if features is not None:
+            self.temporal_aggregator.add(features)
 
         # Store history
         self._history.append(result)
@@ -192,6 +263,8 @@ class ProctoringAgent:
                 risk_engine=self.risk_engine,
                 evidence_memory=self.evidence_memory,
                 agent_state=self._state.value,
+                real_context=self.context,
+                real_baseline=self.baseline,
             ).to_dict()
         except Exception:
             self._last_trace = None
@@ -366,14 +439,25 @@ class ProctoringAgent:
         return predictions
 
     def _reason(self, events: List[Dict], features: Optional[Any],
-                predictions: Dict) -> float:
-        """REASON: Combine all evidence into unified risk score."""
-        # Add events to memory
-        for evt in events:
-            self.evidence_memory.add_event(evt["type"], evt["confidence"])
+                predictions: Dict, signals: Optional[Dict[str, Any]] = None) -> Tuple[float, Any, Any]:
+        """REASON: Combine evidence, context, baseline deviations, uncertainty, and counterfactuals."""
+        signals = signals or {}
 
-        # Compute risk from risk engine
+        # Add events to memory with context-sensitive weighting
+        for evt in events:
+            source = evt.get("source", "vision")
+            w = compute_context_weight(evt["type"], self.context, source)
+            self.evidence_memory.add_event(evt["type"], evt["confidence"] * w)
+
+        # Base risk from evidence memory
         risk = self.risk_engine.compute_risk(self.evidence_memory)
+
+        # Personal baseline deviation
+        baseline_deviations = self.baseline.compute_all_deviations(signals)
+        max_dev = max((d[0] for d in baseline_deviations.values()), default=0.0)
+        maturity = self.baseline.maturity_score()
+        if maturity >= 0.4 and max_dev > 0.5:
+            risk = min(risk + 0.15 * max_dev * maturity, 1.0)
 
         # Fuse with ML predictions
         logistic = predictions.get("logistic_risk")
@@ -384,38 +468,86 @@ class ProctoringAgent:
         if anomaly is not None and anomaly > 0.5:
             risk = min(risk + 0.1 * anomaly, 1.0)
 
-        return min(max(risk, 0.0), 1.0)
+        evidence_score = min(max(risk, 0.0), 1.0)
+
+        # Uncertainty quantification
+        observed_modalities = set()
+        for evt in events:
+            src = evt.get("source")
+            if src:
+                observed_modalities.add(src)
+        if signals.get("face_present", True):
+            observed_modalities.add("vision")
+        if signals.get("mic_active", True):
+            observed_modalities.add("audio")
+        if signals.get("typing_wpm", 0) > 0:
+            observed_modalities.add("keyboard")
+        if signals.get("mouse_velocity", 0) > 0:
+            observed_modalities.add("mouse")
+        if signals.get("browser_active", True):
+            observed_modalities.add("browser")
+
+        signal_confidences = {
+            evt.get("source", "general"): evt.get("confidence", 0.5)
+            for evt in events
+        }
+        uncertainty_estimate = self.uncertainty_engine.evaluate(
+            observed_modalities=observed_modalities,
+            signal_confidences=signal_confidences,
+            prediction_prob=predictions.get("logistic_risk"),
+            corroboration_score=0.7 if len(observed_modalities) >= 2 else 0.3,
+        )
+
+        # Counterfactual causal attribution
+        evidence_items = [
+            {
+                "factor_id": f"f_{i}",
+                "source": evt.get("source", "general"),
+                "event_type": evt.get("type", "unknown"),
+                "contribution": evt.get("confidence", 0.5) * self.risk_engine.EVENT_WEIGHTS.get(evt.get("type", ""), 0.1),
+            }
+            for i, evt in enumerate(events)
+        ]
+        counterfactual_analysis = self.counterfactual_engine.analyze(
+            session_id=self.session_id,
+            current_risk=evidence_score,
+            evidence_contributions=evidence_items,
+        )
+
+        return evidence_score, uncertainty_estimate, counterfactual_analysis
 
     def _decide(self, risk_score: float,
-                events: List[Dict]) -> AgentState:
-        """DECIDE: Determine agent state based on risk score.
+                events: List[Dict],
+                uncertainty_estimate: Optional[Any] = None,
+                technical_incidents: Optional[List[Any]] = None) -> AgentState:
+        """DECIDE: Determine agent state based on risk score, uncertainty, and technical events.
 
         State progression:
         NORMAL → MONITOR → SUSPICIOUS → HIGH_RISK → REVIEW_REQUIRED
-        TECHNICAL_EVENT for sensor failures (separate from integrity)
-        INSUFFICIENT_EVIDENCE when signals are unreliable
+        TECHNICAL_EVENT for hardware/network faults (separate from integrity concerns)
+        INSUFFICIENT_EVIDENCE when sensor reliability is low
         """
         thresholds = self.config.get("risk", {})
         escalation = thresholds.get("escalation_threshold", 0.7)
         review = thresholds.get("review_threshold", 0.5)
         multi_signal = thresholds.get("multi_signal_required", 2)
 
-        # Check for technical events first
-        technical_events = [e for e in events
-                           if e.get("type") in (
-                               "camera_disconnected", "audio_unavailable",
-                               "network_interruption", "browser_crash",
-                           )]
-        if technical_events and not events:
-            return AgentState.TECHNICAL_EVENT
+        # 1. Check for technical incidents first — isolated from integrity violations
+        if technical_incidents and not events:
+            return self._transition_state(AgentState.TECHNICAL_EVENT)
 
-        # Check signal quality
+        # 2. Check signal quality and uncertainty
         active_signals = self.evidence_memory.count_active_signals()
+        if uncertainty_estimate and not uncertainty_estimate.is_actionable:
+            # Epistemic/aleatoric uncertainty is high — do not prematurely escalate
+            if risk_score >= review:
+                return self._transition_state(AgentState.MONITOR)
+            return self._transition_state(AgentState.INSUFFICIENT_EVIDENCE if events else AgentState.NORMAL)
 
         if active_signals == 0 and events:
-            return AgentState.INSUFFICIENT_EVIDENCE
+            return self._transition_state(AgentState.INSUFFICIENT_EVIDENCE)
 
-        new_state = AgentState.NORMAL
+        # 3. Risk-based escalation
         if risk_score >= escalation:
             new_state = AgentState.HIGH_RISK
         elif risk_score >= review:
@@ -423,19 +555,23 @@ class ProctoringAgent:
                 new_state = AgentState.SUSPICIOUS
             else:
                 new_state = AgentState.MONITOR
+        else:
+            new_state = AgentState.NORMAL
 
-        # State transition
+        return self._transition_state(new_state)
+
+    def _transition_state(self, new_state: AgentState) -> AgentState:
+        """Execute state transition and trigger callback if state changed."""
         if new_state != self._state:
             old_state = self._state
             self._state = new_state
             if self._on_state_change:
                 self._on_state_change(old_state.value, new_state.value)
-
         return new_state
 
     def _act(self, events: List[Dict], risk_score: float,
-             state: AgentState) -> List[str]:
-        """ACT: Execute decisions — record evidence, trigger alerts."""
+             state: AgentState, result_payload: Dict[str, Any] = None) -> List[str]:
+        """ACT: Execute decisions — record evidence, trigger alerts, commit to audit chain."""
         actions = []
 
         # Log critical events to evidence
@@ -453,19 +589,30 @@ class ProctoringAgent:
             actions.append("escalated")
         elif state == AgentState.SUSPICIOUS:
             actions.append("monitoring")
+        elif state == AgentState.TECHNICAL_EVENT:
+            actions.append("technical_isolation_active")
 
         # Cryptographically commit event and decision to immutable audit chain
         try:
+            audit_data = {
+                "risk_score": round(risk_score, 4),
+                "state": state.value,
+                "events_count": len(events),
+                "actions": actions,
+            }
+            if result_payload:
+                if result_payload.get("uncertainty"):
+                    audit_data["uncertainty"] = result_payload["uncertainty"]
+                if result_payload.get("baseline"):
+                    audit_data["baseline"] = result_payload["baseline"]
+                if result_payload.get("technical_incidents"):
+                    audit_data["technical_incidents"] = result_payload["technical_incidents"]
+
             self.audit_chain.append(
                 event_type=f"agent_decision_{state.value.lower()}",
                 actor_id="autonomous_agent",
                 session_id=self.session_id,
-                data={
-                    "risk_score": round(risk_score, 4),
-                    "state": state.value,
-                    "events_count": len(events),
-                    "actions": actions,
-                }
+                data=audit_data,
             )
         except Exception:
             pass

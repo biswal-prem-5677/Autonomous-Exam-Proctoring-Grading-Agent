@@ -222,3 +222,19 @@ class GraderDisagreementEngine:
             escalation_reason=esc_reason,
             reconciliation_notes=notes,
         )
+
+    def evaluate(
+        self,
+        student_answer: str,
+        rubric: Dict[str, Any],
+        marks: float = 10.0,
+        question_text: str = "",
+    ) -> ConsensusGradingResult:
+        """Evaluate consensus across grading perspectives."""
+        return self.evaluate_perspectives(
+            question_text=question_text,
+            student_answer=student_answer,
+            rubric=rubric,
+            marks=marks,
+        )
+

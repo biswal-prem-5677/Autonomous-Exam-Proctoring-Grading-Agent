@@ -1,0 +1,17 @@
+{
+  "include": [
+    "src",
+    "app",
+    "tests",
+    "main.py"
+  ],
+  "extraPaths": [
+    ".",
+    "./src"
+  ],
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Windows",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none"
+}

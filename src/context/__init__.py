@@ -18,12 +18,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 
 
-class QuestionType(Enum):
-    MCQ = "mcq"
-    NUMERICAL = "numerical"
-    SHORT_ANSWER = "short_answer"
-    LONG_ANSWER = "long_answer"
-    TRUE_FALSE = "true_false"
+from src.models.models import QuestionType
 
 
 @dataclass

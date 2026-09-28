@@ -241,6 +241,11 @@ class StudentBaseline:
             },
         }
 
+    def get_profile(self) -> Dict:
+        """Alias for to_dict."""
+        return self.to_dict()
+
+
 
 class BaselineManager:
     """Manages per-student baselines across sessions."""

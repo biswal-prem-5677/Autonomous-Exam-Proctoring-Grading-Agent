@@ -3,7 +3,7 @@
 import time
 import threading
 import queue
-from typing import Optional, Tuple
+from typing import Optional
 import numpy as np
 import cv2
 

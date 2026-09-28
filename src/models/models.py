@@ -12,6 +12,8 @@ class QuestionType(Enum):
     SHORT_ANSWER = "short_answer"
     LONG_ANSWER = "long_answer"
     TRUE_FALSE = "true_false"
+    MATHEMATICAL = "mathematical"
+    PROGRAMMING = "programming"
 
 
 class AgentState(Enum):
@@ -35,6 +37,7 @@ class Question:
     marks: float = 1.0
     keywords: List[str] = field(default_factory=list)  # For short answer
     tolerance: Optional[float] = None                      # For numerical (None = use grader default)
+    rubric: Optional[Dict[str, Any]] = None               # Optional rubric for grading
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -70,6 +73,11 @@ class Exam:
     topic: str = ""
     difficulty: str = "medium"
     created_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def id(self) -> str:
+        """Alias for exam_id for compatibility."""
+        return self.exam_id
 
     def add_question(self, qtype: str, text: str, **kwargs):
         """Add a question to the exam."""

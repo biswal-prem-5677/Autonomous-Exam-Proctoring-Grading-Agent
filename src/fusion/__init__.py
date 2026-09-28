@@ -298,3 +298,20 @@ def _empty_result(temporal_window):
         explanation="No signals to corroborate.",
     )
 
+
+class CrossModalCorroborationEngine:
+    """Orchestrator for cross-modal corroboration, temporal alignment, and contradiction detection."""
+
+    def __init__(self, temporal_window: float = DEFAULT_TEMPORAL_WINDOW, min_signals: int = 2):
+        self.temporal_window = temporal_window
+        self.min_signals = min_signals
+
+    def evaluate(self, signals: List[CorroborationSignal]) -> CorroborationResult:
+        """Evaluate a list of sensory signals for cross-modal corroboration."""
+        return compute_corroboration(
+            signals,
+            temporal_window=self.temporal_window,
+            min_signals=self.min_signals
+        )
+
+

@@ -3,7 +3,6 @@
 import time
 import threading
 from typing import Optional, Callable
-from datetime import datetime
 
 
 class KeyboardSensor:

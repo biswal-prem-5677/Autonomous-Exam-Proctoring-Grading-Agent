@@ -8,10 +8,12 @@ import sys
 import os
 import json
 import time
+import uuid
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Optional
+from typing import Dict, Any, List, Optional
+
 
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -46,6 +48,14 @@ from src.reports.examiner_report import ExaminerReportGenerator
 from src.reports.evidence import EvidenceLog, EvidenceSeverity
 from src.database.db import Database, DB_PATH
 from src.utils.config import load_config
+from src.trace.replay import DecisionReplayEngine
+from src.trace.audit_chain import AuditChain
+from src.grading.mathematical import MathematicalGrader
+from src.grading.programming import ProgrammingGrader
+from src.grading.plagiarism import PlagiarismDetector
+from src.grading.consensus import GraderDisagreementEngine
+from src.ml.adversarial import RedTeamHarness, AdversarialSimulator
+from src.baseline import StudentBaseline
 
 # ── App setup ────────────────────────────────────────────────────────────────
 app = Flask(__name__,
@@ -63,6 +73,11 @@ _knowledge_tracers: Dict[str, KnowledgeTracer] = {}
 _performance_predictors: Dict[str, PerformancePredictor] = {}
 _difficulty_estimators: Dict[str, DifficultyEstimator] = {}
 _grading_orchestrator = GradingOrchestrator()
+_audit_chain = AuditChain(db_path=str(DB_PATH.parent / "audit_chain.db"))
+_math_grader = MathematicalGrader()
+_prog_grader = ProgrammingGrader()
+_consensus_engine = GraderDisagreementEngine()
+_student_baselines: Dict[str, StudentBaseline] = {}
 # Training metadata — tracks actual training events, not fake status
 _training_records: List[Dict] = []
 _db_instance: Optional[Database] = None
@@ -466,8 +481,34 @@ def grade_answers():
     student_id = data.get("student_id", "unknown")
 
     exam = _exam_manager.get_exam(exam_id)
+    questions_data = data.get("questions")
+    if not exam and questions_data:
+        questions = []
+        for qd in questions_data:
+            q_type = QuestionType(qd.get("type", "mcq"))
+            questions.append(Question(
+                id=qd.get("id", str(uuid.uuid4())[:8]),
+                type=q_type,
+                text=qd.get("text", ""),
+                options=qd.get("options"),
+                correct_answer=qd.get("correct_answer"),
+                marks=float(qd.get("marks", 1.0)),
+                tolerance=float(qd.get("tolerance", 0.01)) if qd.get("tolerance") is not None else None,
+                rubric=qd.get("rubric"),
+            ))
+        results = _grading_orchestrator.grade_all(questions, answers, reference_answers)
+        return jsonify({
+            "exam_id": "ad_hoc",
+            "student_id": student_id,
+            "per_question": results.get("per_question", {}),
+            "total_score": results.get("total_score", 0.0),
+            "total_max": results.get("total_max", 0.0),
+            "percentage": results.get("percentage", 0.0),
+        })
+
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
+
 
     if not answers:
         return jsonify({
@@ -1282,7 +1323,13 @@ def generate_demo_answers():
 
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
-        return jsonify({"error": "Exam not found"}), 404
+        all_exams = _exam_manager.list_exams()
+        if all_exams:
+            exam = all_exams[0]
+            exam_id = exam.id
+        else:
+            return jsonify({"error": "Exam not found"}), 404
+
 
     # Sample answers — mix of correct, partially correct, and incorrect
     sample_answers = {
@@ -1842,10 +1889,24 @@ def submit_answers():
     student_id = data.get("student_id", "unknown")
     exam_id = data.get("exam_id", "unknown")
     answers = data.get("answers", {})
+    session_key = data.get("session_key")
+    if session_key and ":" in session_key:
+        student_id, exam_id = session_key.split(":", 1)
+    elif session_key and session_key in _active_sessions:
+        sinfo = _active_sessions[session_key]
+        exam = sinfo.get("exam")
+        if exam:
+            exam_id = exam.id
 
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
-        return jsonify({"error": "Exam not found"}), 404
+        all_exams = _exam_manager.list_exams()
+        if all_exams:
+            exam = all_exams[0]
+            exam_id = exam.id
+        else:
+            return jsonify({"error": "Exam not found"}), 404
+
 
     # Grade
     ref_answers = {}
@@ -2532,8 +2593,229 @@ def _compute_signal_activity(history):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  WORLD-CLASS INTELLIGENCE & AUDITABILITY ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/trace/replay/<session_id>", methods=["GET"])
+def replay_session_trace(session_id: str):
+    """Forensically replay session decisions with the DecisionReplayEngine."""
+    agent = _proctoring_agents.get(session_id)
+    traces = []
+    student_id = "student_session"
+
+    if agent:
+        traces = [h for h in agent.get_history() if "risk_score" in h]
+        student_id = agent.baseline.student_id if hasattr(agent, "baseline") else student_id
+    else:
+        for k, sinfo in _active_sessions.items():
+            if sinfo.get("session_id") == session_id or k == session_id:
+                ctrl = sinfo.get("controller")
+                if ctrl and hasattr(ctrl, "agent"):
+                    agent = ctrl.agent
+                    traces = agent.get_history()
+                    student_id = k.split(":")[0] if ":" in k else student_id
+                break
+
+    replayer = DecisionReplayEngine(session_id=session_id, student_id=student_id)
+    if traces:
+        replayer.load_from_traces(traces)
+
+    step_param = request.args.get("step")
+    if step_param is not None:
+        try:
+            step_idx = int(step_param)
+            snapshot = replayer.seek(step_idx)
+            if snapshot:
+                return jsonify({"status": "success", "snapshot": snapshot.to_dict()})
+            return jsonify({"error": f"Step {step_idx} out of range"}), 404
+        except ValueError:
+            return jsonify({"error": "Invalid step parameter, must be integer"}), 400
+
+    return jsonify({
+        "status": "success",
+        "session_id": session_id,
+        "student_id": student_id,
+        "total_steps": replayer.total_steps(),
+        "timeline": replayer.export_timeline(),
+    })
+
+
+@app.route("/api/trace/audit-chain/<session_id>", methods=["GET"])
+def get_audit_chain(session_id: str):
+    """Retrieve cryptographic SHA-256 Merkle audit entries for a session."""
+    limit = int(request.args.get("limit", 100))
+    offset = int(request.args.get("offset", 0))
+    entries = _audit_chain.get_entries(session_id=session_id, limit=limit, offset=offset)
+    total = _audit_chain.get_chain_length(session_id=session_id)
+    return jsonify({
+        "status": "success",
+        "session_id": session_id,
+        "total_entries": total,
+        "entries": [e.to_dict() for e in entries],
+    })
+
+
+@app.route("/api/trace/audit-chain/<session_id>/verify", methods=["POST"])
+def verify_audit_chain(session_id: str):
+    """Cryptographically verify the hash chain integrity for an exam session."""
+    is_valid, broken_sequence = _audit_chain.verify_integrity(session_id=session_id)
+    return jsonify({
+        "status": "success",
+        "session_id": session_id,
+        "is_intact": is_valid,
+        "broken_at_sequence": broken_sequence,
+        "verification_timestamp": time.time(),
+    })
+
+
+@app.route("/api/grading/mathematical", methods=["POST"])
+def grade_mathematical():
+    """Grade multi-step mathematical & derivation answers with partial credit."""
+    data = request.get_json() or {}
+    student_solution = data.get("student_solution", "")
+    expected_formula = data.get("expected_formula", "")
+    expected_variables = data.get("expected_variables", {})
+    expected_final_value = data.get("expected_final_value")
+    expected_units = data.get("expected_units")
+    marks = float(data.get("marks", 10.0))
+    tolerance = float(data.get("tolerance", 0.02)) if data.get("tolerance") is not None else None
+
+    result = _math_grader.grade(
+        student_solution=student_solution,
+        expected_formula=expected_formula,
+        expected_variables=expected_variables,
+        expected_final_value=expected_final_value,
+        expected_units=expected_units,
+        marks=marks,
+        tolerance=tolerance,
+    )
+    return jsonify({"status": "success", "result": result.to_dict()})
+
+
+@app.route("/api/grading/programming", methods=["POST"])
+def grade_programming():
+    """Grade programming questions using pure AST parsing and sandbox execution."""
+    data = request.get_json() or {}
+    code_str = data.get("code", "")
+    entry_function = data.get("entry_function", "")
+    public_tests = data.get("public_tests", [])
+    hidden_tests = data.get("hidden_tests", [])
+    edge_cases = data.get("edge_cases", [])
+    marks = float(data.get("marks", 10.0))
+    max_complexity = int(data.get("max_allowed_complexity", 15))
+
+    result = _prog_grader.grade(
+        code_str=code_str,
+        entry_function_name=entry_function,
+        public_tests=public_tests,
+        hidden_tests=hidden_tests,
+        edge_cases=edge_cases,
+        marks=marks,
+        max_allowed_complexity=max_complexity,
+    )
+    return jsonify({"status": "success", "result": result.to_dict()})
+
+
+@app.route("/api/grading/plagiarism", methods=["POST"])
+def detect_plagiarism():
+    """Detect cohort-wide near-duplicate answers via pure-math MinHash & LSH."""
+    data = request.get_json() or {}
+    submissions = data.get("submissions", {})
+    threshold = float(data.get("threshold", 0.60))
+    exam_id = data.get("exam_id", "exam_cohort")
+
+    detector = PlagiarismDetector(threshold=threshold)
+    if submissions and isinstance(next(iter(submissions.values())), dict):
+        for qid, qsubs in submissions.items():
+            for sid, ans in qsubs.items():
+                detector.add_submission(sid, qid, ans)
+    else:
+        for sid, ans in submissions.items():
+            detector.add_submission(sid, "default_q", ans)
+
+    report = detector.detect(exam_id=exam_id)
+    return jsonify({
+        "status": "success",
+        "exam_id": report.exam_id,
+        "total_submissions": report.total_submissions,
+        "total_pairs_checked": report.total_pairs_checked,
+        "flagged_pairs": [
+            {
+                "student_a": p.student_a,
+                "student_b": p.student_b,
+                "jaccard_similarity": p.jaccard_similarity,
+                "minhash_similarity": p.minhash_similarity,
+                "shared_shingles": p.shared_shingles_count,
+                "flagged": p.flagged,
+                "question_id": p.question_id,
+            }
+            for p in report.flagged_pairs
+        ],
+        "summary": report.summary,
+    })
+
+
+@app.route("/api/grading/consensus", methods=["POST"])
+def evaluate_rubric_consensus():
+    """Evaluate multi-perspective consensus and detect grader disagreement."""
+    data = request.get_json() or {}
+    student_answer = data.get("student_answer", "")
+    rubric = data.get("rubric", {})
+    marks = float(data.get("marks", 10.0))
+
+    result = _consensus_engine.evaluate(student_answer, rubric, marks)
+    return jsonify({"status": "success", "result": result.to_dict()})
+
+
+@app.route("/api/ml/adversarial/benchmark", methods=["POST"])
+def run_adversarial_benchmark():
+    """Run pure-math red-team adversarial stress testing against the proctoring agent."""
+    data = request.get_json() or {}
+    threshold = float(data.get("escalation_threshold", 0.65))
+
+    harness = RedTeamHarness(escalation_threshold=threshold)
+    test_agent = ProctoringAgent()
+    report = harness.evaluate_agent(lambda sig: test_agent.process_signals(sig))
+    return jsonify({"status": "success", "report": report.to_dict()})
+
+
+@app.route("/api/baseline/<student_id>", methods=["GET", "POST"])
+def student_baseline_profile(student_id: str):
+    """Retrieve or update a student's personal behavioral baseline."""
+    if student_id not in _student_baselines:
+        _student_baselines[student_id] = StudentBaseline(student_id=student_id)
+    baseline = _student_baselines[student_id]
+
+    if request.method == "POST":
+        data = request.get_json() or {}
+        from src.baseline import BehavioralSample
+        sample = BehavioralSample(
+            timestamp=data.get("timestamp", time.time()),
+            typing_wpm=float(data.get("typing_wpm", 0.0)),
+            mouse_velocity=float(data.get("mouse_velocity", 0.0)),
+            mouse_clicks=int(data.get("mouse_clicks", 0)),
+            face_present=float(data.get("face_present", 1.0)),
+            face_count=int(data.get("face_count", 1)),
+            gaze_off_screen_seconds=float(data.get("gaze_off_screen_seconds", 0.0)),
+            pause_duration_seconds=float(data.get("pause_duration_seconds", 0.0)),
+        )
+        baseline.add_sample(sample)
+
+    return jsonify({
+        "status": "success",
+        "student_id": student_id,
+        "sample_count": baseline.samples,
+        "maturity": baseline.maturity_score(),
+        "is_ready": baseline.is_ready(),
+        "profile": baseline.get_profile(),
+    })
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  ERROR HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @app.errorhandler(404)
 def not_found(e):

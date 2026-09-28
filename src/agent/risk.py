@@ -14,14 +14,13 @@ where:
     λ    = corroboration strength multiplier
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional
 import numpy as np
 
 from src.agent.memory import EvidenceMemory
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
-from src.context import ExamContext, ExamPolicy, compute_context_weight
+from src.context import ExamContext, compute_context_weight
 from src.baseline import StudentBaseline
 from src.fusion import compute_corroboration, CorroborationSignal, ModalitySource
 

@@ -19,7 +19,7 @@ import time
 import uuid
 import sqlite3
 import threading
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path

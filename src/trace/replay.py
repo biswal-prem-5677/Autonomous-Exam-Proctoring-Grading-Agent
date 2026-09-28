@@ -14,10 +14,9 @@ tick-by-tick (like a flight data recorder):
 Inspect why every parameter changed at any microsecond of the exam.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import json
 
 
 @dataclass
