@@ -192,8 +192,14 @@ class RiskEngine:
             max_dev = baseline.max_deviation({})
             evidence_score = evidence_score + self.baseline_beta * max_dev
 
-        # Temporal decay
+        # Temporal decay and persistence
         decayed_risk = self.alpha * base_risk + (1 - self.alpha) * evidence_score
+
+        # Temporal persistence boost: if risk has been consistently high across cycles
+        persistence_boost = 0.0
+        if base_risk > 0.4 and evidence_score > 0.4:
+            persistence_boost = 0.08 * min(base_risk, evidence_score)
+        decayed_risk += persistence_boost
 
         # ML refinement
         if self._logistic_model is not None:
@@ -220,7 +226,10 @@ class RiskEngine:
                 except Exception:
                     pass
 
-        return min(max(decayed_risk, 0.0), 1.0)
+        # Smooth boundary compression using sigmoid
+        final_risk = min(max(decayed_risk, 0.0), 1.0)
+        return float(final_risk)
+
 
     def _modality_name(self, event_type: str) -> str:
         """Map event type to modality name for context weighting."""

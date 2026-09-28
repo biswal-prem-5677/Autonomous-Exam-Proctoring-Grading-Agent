@@ -68,9 +68,44 @@ class StudentBaseline:
     # Bounds for raw sample storage
     _max_raw_samples: int = 200
 
+    def maturity_score(self) -> float:
+        """Compute baseline maturity score in [0.0, 1.0].
+
+        Reflects how trustworthy this student's baseline is:
+        - 0.0: No data or very few samples (< 5)
+        - 0.5: Moderate samples, settling variance
+        - 1.0: Mature baseline (>= 30 samples, stabilized stats)
+        """
+        if self.samples < 5:
+            return 0.0
+        sample_factor = min(self.samples / 30.0, 1.0)
+        # Volatility check: if variance is huge relative to mean, discount maturity
+        volatility_discount = 1.0
+        if self.typing_wpm_mean > 0 and self.typing_wpm_std > 2.0 * self.typing_wpm_mean:
+            volatility_discount = 0.8
+        return round(sample_factor * volatility_discount, 3)
+
     def is_ready(self) -> bool:
         """Whether the baseline has enough samples to be reliable."""
         return self.samples >= 5
+
+    @staticmethod
+    def _compute_mad(data: List[float]) -> float:
+        """Compute Median Absolute Deviation (MAD): robust non-parametric spread."""
+        if len(data) < 3:
+            return 0.0
+        arr = np.array(data)
+        median = np.median(arr)
+        return float(np.median(np.abs(arr - median)))
+
+    @staticmethod
+    def _compute_iqr(data: List[float]) -> Tuple[float, float, float]:
+        """Compute Interquartile Range (Q1, Q3, IQR)."""
+        if len(data) < 4:
+            return 0.0, 0.0, 0.0
+        arr = np.array(data)
+        q75, q25 = np.percentile(arr, [75, 25])
+        return float(q25), float(q75), float(q75 - q25)
 
     def add_sample(self, sample: BehavioralSample) -> None:
         """Add a behavioral observation and update the baseline."""
@@ -114,9 +149,17 @@ class StudentBaseline:
                 self.gaze_off_screen_std = float(np.std(self._gaze_samples))
 
     def deviation_typing(self, current_wpm: float) -> Tuple[bool, float]:
-        """Returns (is_anomalous, deviation_score 0-1)."""
+        """Returns (is_anomalous, deviation_score 0-1) using both MAD and Z-score."""
         if not self.is_ready():
             return False, 0.0
+        # Robust check using MAD if enough samples
+        mad = self._compute_mad(self._typing_samples)
+        if mad > 0.5 and len(self._typing_samples) >= 5:
+            median_val = float(np.median(self._typing_samples))
+            mad_dev = abs(current_wpm - median_val) / (1.4826 * mad)  # 1.4826 is normal consistency factor
+            deviation = min(mad_dev / 3.0, 1.0)
+            return bool(mad_dev > 2.5), deviation
+
         if self.typing_wpm_std < 0.5:
             return False, 0.0
         z = abs(current_wpm - self.typing_wpm_mean) / max(self.typing_wpm_std, 0.5)

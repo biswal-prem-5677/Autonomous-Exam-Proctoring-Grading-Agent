@@ -14,6 +14,7 @@ P(E_1) × (1 + (n-1) × correlation_factor × avg_reliability)
 """
 
 import numpy as np
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
@@ -40,6 +41,15 @@ class CorroborationSignal:
 
 
 @dataclass
+class ContradictionRecord:
+    modality_a: str
+    modality_b: str
+    description: str
+    confidence: float
+    implication: str  # e.g., "external_audio_source", "automated_input_injection", "sensor_glitch"
+
+
+@dataclass
 class CorroborationResult:
     signal_count: int
     independent_modalities: int
@@ -48,6 +58,7 @@ class CorroborationResult:
     corroboration_label: str
     correlated_group: List[Dict]
     uncorrelated_signals: List[Dict]
+    contradictions: List[ContradictionRecord]
     explanation: str
 
 
@@ -67,16 +78,78 @@ _MODALITY_RELIABILITY: Dict[ModalitySource, float] = {
 DEFAULT_TEMPORAL_WINDOW = 5.0
 
 
+def _detect_contradictions(signals: List[CorroborationSignal]) -> List[ContradictionRecord]:
+    """Detect physical/logical contradictions across sensory modalities.
+
+    Examples:
+    - Audio speech detected, but vision indicates closed mouth / no facial motion
+      -> suggests background speaker / television / external noise, not student speaking.
+    - Rapid keystroke typing, but motion detector shows zero body/hand motion
+      -> suggests macro / script / automated input injection.
+    - Gaze away event, but face is absent
+      -> sensor mismatch / invalid gaze estimation without face.
+    """
+    contradictions = []
+    events_by_mod = defaultdict(list)
+    for s in signals:
+        events_by_mod[s.modality].append(s)
+
+    vision_events = {s.event_type: s for s in events_by_mod.get(ModalitySource.VISION, [])}
+    audio_events = {s.event_type: s for s in events_by_mod.get(ModalitySource.AUDIO, [])}
+    kb_events = {s.event_type: s for s in events_by_mod.get(ModalitySource.KEYBOARD, [])}
+
+    # 1. Audio speech vs Vision mouth movement
+    if "speech_detected" in audio_events:
+        speech_sig = audio_events["speech_detected"]
+        # Check if vision reports mouth still or no face motion in details
+        mouth_moving = speech_sig.details.get("mouth_moving", False)
+        if not mouth_moving and "face_absent" not in vision_events and vision_events:
+            contradictions.append(ContradictionRecord(
+                modality_a="audio",
+                modality_b="vision",
+                description="Speech detected in audio but vision observed no corresponding mouth movement.",
+                confidence=0.82,
+                implication="external_audio_source",
+            ))
+
+    # 2. Keystroke typing vs Motion
+    if "rapid_typing" in kb_events and "movement" in vision_events:
+        mov_sig = vision_events["movement"]
+        if mov_sig.severity < 0.05:  # virtually zero movement
+            contradictions.append(ContradictionRecord(
+                modality_a="keyboard",
+                modality_b="vision",
+                description="Rapid typing detected while upper body / hand motion is static.",
+                confidence=0.78,
+                implication="automated_input_injection",
+            ))
+
+    # 3. Gaze deviation vs Face absent
+    if "gaze_away" in vision_events and "face_absent" in vision_events:
+        contradictions.append(ContradictionRecord(
+            modality_a="vision_gaze",
+            modality_b="vision_face",
+            description="Gaze deviation registered while face is completely absent.",
+            confidence=0.95,
+            implication="sensor_contradiction",
+        ))
+
+    return contradictions
+
+
 def compute_corroboration(
     signals: List[CorroborationSignal],
     temporal_window: float = DEFAULT_TEMPORAL_WINDOW,
     min_signals: int = 2,
 ) -> CorroborationResult:
-    """Analyze signals for cross-modal corroboration."""
+    """Analyze signals for cross-modal corroboration, independence, and contradictions."""
     if not signals:
         return _empty_result(temporal_window)
 
     sorted_signals = sorted(signals, key=lambda s: s.timestamp)
+
+    # Detect contradictions
+    contradictions = _detect_contradictions(sorted_signals)
 
     # Find temporally-correlated groups
     groups = _find_temporal_groups(sorted_signals, temporal_window)
@@ -106,8 +179,6 @@ def compute_corroboration(
         avg_rel = np.mean([
             _MODALITY_RELIABILITY.get(m, 0.5) for m in unique_modalities
         ])
-        # Blend base score with reliability factor
-        # High reliability → score approaches 1.0
         base_score = base_score * (0.6 + 0.4 * avg_rel)
 
     # Temporal spread: tighter grouping = higher confidence
@@ -117,11 +188,18 @@ def compute_corroboration(
             spread_bonus = (1.0 - time_span / temporal_window) * 0.10
             base_score = min(base_score + spread_bonus, 1.0)
 
+    # Discount score if contradictions exist (e.g. external audio rather than student speaking)
+    if contradictions:
+        max_contra_conf = max(c.confidence for c in contradictions)
+        base_score = max(0.2, base_score * (1.0 - 0.4 * max_contra_conf))
+
     score = min(max(base_score, 0.0), 1.0)
 
-    # Label based on independent modality count and score
+    # Label based on independent modality count, score, and contradictions
     if independent_count < min_signals:
         label = "UNCORROBORATED"
+    elif contradictions:
+        label = "CONTRADICTED"
     elif score >= 0.85:
         label = "STRONGLY_CORROBORATED"
     elif score >= 0.70:
@@ -132,7 +210,7 @@ def compute_corroboration(
         label = "UNCORROBORATED"
 
     explanation = _explain(label, independent_count, sig_count,
-                           unique_modalities, uncorrelated, temporal_window)
+                           unique_modalities, uncorrelated, temporal_window, contradictions)
 
     return CorroborationResult(
         signal_count=len(sorted_signals),
@@ -142,8 +220,10 @@ def compute_corroboration(
         corroboration_label=label,
         correlated_group=correlated,
         uncorrelated_signals=uncorrelated,
+        contradictions=contradictions,
         explanation=explanation,
     )
+
 
 
 def _find_temporal_groups(signals, window):
@@ -181,24 +261,31 @@ def _signal_to_dict(sig):
     }
 
 
-def _explain(label, independent, total, modalities, uncorrelated, window):
+def _explain(label, independent, total, modalities, uncorrelated, window, contradictions=None):
     mod_names = ", ".join(sorted(m.value for m in modalities))
     uncorr_count = len(uncorrelated)
+    contra_note = ""
+    if contradictions:
+        contra_note = f" CONTRADICTION DETECTED: {len(contradictions)} cross-modal conflict(s) identified."
+
+    if label == "CONTRADICTED":
+        return (f"Cross-modal contradiction observed between sensory channels.{contra_note} "
+                f"Discounting integrity escalation pending human verification.")
 
     if independent >= 4:
         return (f"{total} signals across {independent} independent modalities "
                 f"({mod_names}) temporally aligned within {window:.1f}s. "
-                f"Strong cross-modal corroboration. {label}.")
+                f"Strong cross-modal corroboration.{contra_note} {label}.")
     elif independent >= 2:
         uncorr_note = (f" {uncorr_count} additional signal(s) without "
                         f"corroboration." if uncorr_count > 0 else "")
         return (f"{total} signals across {independent} independent modalities "
                 f"({mod_names}) within {window:.1f}s. "
-                f"Moderate cross-modal evidence.{uncorr_note} {label}.")
+                f"Moderate cross-modal evidence.{uncorr_note}{contra_note} {label}.")
     elif independent == 1:
         return (f"{total} signal(s) from single modality ({mod_names}). "
-                f"No cross-modal corroboration. {label}.")
-    return f"No corroborating evidence. {label}."
+                f"No cross-modal corroboration.{contra_note} {label}.")
+    return f"No corroborating evidence.{contra_note} {label}."
 
 
 def _empty_result(temporal_window):
@@ -207,5 +294,7 @@ def _empty_result(temporal_window):
         temporal_window_seconds=temporal_window,
         corroboration_score=0.0, corroboration_label="NO_SIGNALS",
         correlated_group=[], uncorrelated_signals=[],
+        contradictions=[],
         explanation="No signals to corroborate.",
     )
+

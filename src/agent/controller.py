@@ -14,6 +14,10 @@ from src.features.temporal import TemporalFeatureAggregator
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
 from src.trace import IntegrityDecisionTrace, EvidenceContribution, CounterfactualResult, build_explainability_trace, build_trace_id
+from src.trace.audit_chain import AuditChain
+from src.agent.technical import TechnicalEventEngine
+from src.agent.uncertainty import UncertaintyEngine
+from src.agent.counterfactual import CounterfactualEngine
 from src.baseline import StudentBaseline
 from src.context import ExamContext
 
@@ -60,6 +64,19 @@ class ProctoringAgent:
         self.temporal_aggregator = TemporalFeatureAggregator(
             window_size=self.config.get("temporal_window", 30)
         )
+        self.technical_engine = TechnicalEventEngine(
+            grace_period_seconds=self.config.get("technical_grace_period", 60.0)
+        )
+        self.uncertainty_engine = UncertaintyEngine(
+            action_confidence_threshold=self.config.get("action_confidence_threshold", 0.65)
+        )
+        self.counterfactual_engine = CounterfactualEngine(
+            review_threshold=self.config.get("risk", {}).get("review_threshold", 0.50)
+        )
+        self.audit_chain = AuditChain(
+            db_path=self.config.get("audit_db", "data/audit_chain.db")
+        )
+
 
         # ML models (set externally after training)
         self._logistic_model: Optional[LogisticRegressionScratch] = None
@@ -221,8 +238,14 @@ class ProctoringAgent:
     # ── Private: Phase Implementations ──────────────────────────────────
 
     def _perceive(self, signals: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """PERCEIVE: Extract structured events from raw signals."""
+        """PERCEIVE: Extract structured events from raw signals.
+
+        Each event carries a real timestamp from the source signal or
+        the time of detection. No fabricated timestamps.
+        """
         events = []
+        detected_at = signals.get("detected_at", time.time())
+        session_elapsed = signals.get("session_elapsed", 0)
 
         # Vision events
         if not signals.get("face_present", True):
@@ -230,6 +253,8 @@ class ProctoringAgent:
                 "type": "face_absent",
                 "confidence": signals.get("face_confidence", 0.0),
                 "source": "vision",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
         face_count = signals.get("face_count", 1)
         if face_count > 1:
@@ -237,6 +262,8 @@ class ProctoringAgent:
                 "type": "multiple_faces",
                 "confidence": 0.8,
                 "source": "vision",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
 
         head = signals.get("head_pose", {}) or {}
@@ -245,6 +272,8 @@ class ProctoringAgent:
                 "type": "head_turned",
                 "confidence": 0.7,
                 "source": "vision",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
 
         # Audio events
@@ -254,6 +283,8 @@ class ProctoringAgent:
                 "type": "loud_audio",
                 "confidence": 0.5,
                 "source": "audio",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
 
         # Keyboard events
@@ -263,12 +294,16 @@ class ProctoringAgent:
                 "type": "idle_keyboard",
                 "confidence": 0.3,
                 "source": "keyboard",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
         if signals.get("paste_detected", False):
             events.append({
                 "type": "paste_detected",
                 "confidence": 0.9,
                 "source": "keyboard",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
 
         # Mouse events
@@ -278,6 +313,8 @@ class ProctoringAgent:
                 "type": "idle_mouse",
                 "confidence": 0.3,
                 "source": "mouse",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
 
         # Temporal events
@@ -285,10 +322,13 @@ class ProctoringAgent:
             events.append({
                 "type": "tab_switch",
                 "confidence": 0.6,
-                "source": "temporal",
+                "source": "browser",
+                "timestamp": detected_at,
+                "session_elapsed": session_elapsed,
             })
 
         return events
+
 
     def _featureize(self, signals: Dict[str, Any]) -> Optional[Any]:
         """FEATUREIZE: Convert signals to ML feature vector."""
@@ -414,4 +454,21 @@ class ProctoringAgent:
         elif state == AgentState.SUSPICIOUS:
             actions.append("monitoring")
 
+        # Cryptographically commit event and decision to immutable audit chain
+        try:
+            self.audit_chain.append(
+                event_type=f"agent_decision_{state.value.lower()}",
+                actor_id="autonomous_agent",
+                session_id=self.session_id,
+                data={
+                    "risk_score": round(risk_score, 4),
+                    "state": state.value,
+                    "events_count": len(events),
+                    "actions": actions,
+                }
+            )
+        except Exception:
+            pass
+
         return actions
+

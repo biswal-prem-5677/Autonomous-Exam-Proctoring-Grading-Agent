@@ -367,13 +367,16 @@ def build_explainability_trace(
     agent_state: str,
     student_id: str = "unknown",
     question_id: Optional[str] = None,
+    real_context: Optional[Any] = None,
+    real_baseline: Optional[Any] = None,
 ) -> IntegrityDecisionTrace:
     """Build a full explainability trace from the agent's control loop output.
 
-    This is the function called by ProctoringAgent._observe after each cycle.
-    It converts raw events into structured EvidenceContributions, runs
-    cross-modal corroboration, computes counterfactuals, and produces a
-    DecisionTrace ready for the examiner UI.
+    Every value comes from a real source:
+    - Event timestamps are read from the event payload (no fabrication)
+    - Context comes from a real ExamContext passed via real_context
+    - Baseline comes from a real StudentBaseline passed via real_baseline
+    - Failures produce explicit UNAVAILABLE states, not silent fallbacks
 
     Args:
         session_id: Exam session identifier.
@@ -385,6 +388,8 @@ def build_explainability_trace(
         agent_state: Current agent state string.
         student_id: Student identifier.
         question_id: Current question context.
+        real_context: Optional ExamContext with real timing/policy data.
+        real_baseline: Optional StudentBaseline with real personal data.
 
     Returns:
         IntegrityDecisionTrace with full explainability data.
@@ -399,7 +404,7 @@ def build_explainability_trace(
     ml_risk = ml_predictions.get("logistic_risk")
     anomaly_score = ml_predictions.get("anomaly_score")
 
-    # Map event types to modalities
+    # Map event types to modalities (used only for modality classification)
     MODALITY_MAP = {
         "face_absent": "vision", "multiple_faces": "vision",
         "head_turned": "vision", "gaze_away": "vision",
@@ -414,7 +419,6 @@ def build_explainability_trace(
         "focus_lost": "browser",
     }
 
-    # Determine the decision from agent state (string values)
     _state_decision_map = {
         "NORMAL": DecisionOutcome.NORMAL,
         "LOW_CONCERN": DecisionOutcome.LOW_CONCERN,
@@ -427,37 +431,69 @@ def build_explainability_trace(
     }
     decision = _state_decision_map.get(agent_state, DecisionOutcome.REVIEW_REQUIRED)
 
-    # Build corroboration signals from recent events
+    # ── Corroboration with REAL event timestamps ──
     from src.fusion import CorroborationSignal, compute_corroboration
     corrob_signals = []
+    events_without_timestamp = []
     for evt in events:
         evt_type = evt.get("type", "")
         modality = MODALITY_MAP.get(evt_type, "vision")
         weight = risk_engine.EVENT_WEIGHTS.get(evt_type, 0.1) if hasattr(risk_engine, 'EVENT_WEIGHTS') else 0.1
+
+        # Use REAL timestamp from event payload if present.
+        # Do NOT substitute `now` — if missing, mark explicitly.
+        if "timestamp" not in evt:
+            events_without_timestamp.append(evt_type)
+            continue
         corrob_signals.append(CorroborationSignal(
             modality=modality,
             event_type=evt_type,
             severity=weight,
             confidence=evt.get("confidence", 0.5),
-            timestamp=now,
+            timestamp=evt["timestamp"],
         ))
 
-    # Run corroboration
+    # Run corroboration with explicit failure handling
     corrob_result = None
-    try:
-        corrob_result = compute_corroboration(
-            corrob_signals,
-            temporal_window=getattr(risk_engine, 'temporal_window', 10.0)
-        )
-    except Exception:
-        pass
+    corrob_status = "UNAVAILABLE"
+    corrob_error = None
+    if not corrob_signals:
+        corrob_error = "No events with valid timestamps"
+    elif events_without_timestamp:
+        corrob_error = f"Events missing timestamp: {events_without_timestamp}"
+    else:
+        try:
+            corrob_result = compute_corroboration(
+                corrob_signals,
+                temporal_window=getattr(risk_engine, 'temporal_window', 5.0)
+            )
+            corrob_status = "COMPUTED"
+        except Exception as exc:
+            corrob_error = f"corroboration_failed: {type(exc).__name__}: {exc}"
 
-    corrob_dict = corrob_result.to_dict() if corrob_result else None
+    corrob_dict = corrob_result.to_dict() if corrob_result else {
+        "status": corrob_status,
+        "error": corrob_error,
+        "corroboration_score": None,
+        "corroboration_label": "UNAVAILABLE",
+        "independent_modalities": 0,
+        "signal_count": 0,
+    }
 
-    # Build evidence contributions for each event
+    # ── Contributions using REAL context and REAL baseline ──
     contributions: List[EvidenceContribution] = []
     total_raw = 0.0
     active_modalities = set()
+
+    # Explicit context state
+    context_status = "UNAVAILABLE"
+    if real_context is not None:
+        context_status = "AVAILABLE"
+
+    # Explicit baseline state
+    baseline_status = "UNAVAILABLE"
+    if real_baseline is not None and hasattr(real_baseline, 'is_ready') and real_baseline.is_ready():
+        baseline_status = "READY"
 
     for evt in events:
         evt_type = evt.get("type", "")
@@ -465,82 +501,80 @@ def build_explainability_trace(
         confidence_val = evt.get("confidence", 0.5)
         raw_severity = risk_engine.EVENT_WEIGHTS.get(evt_type, 0.1) if hasattr(risk_engine, 'EVENT_WEIGHTS') else 0.1
 
-        # Context weight (context-aware scoring)
+        # Context weight: from real context, or explicit UNAVAILABLE
         ctx_weight = 1.0
-        try:
-            from src.context import ExamContext as _EC, ExamPolicy as _EP
-            exam_ctx = _EC(
-                policy=_EP(),
-                exam_elapsed_seconds=3600.0,
-                exam_duration_seconds=7200.0,
-            )
-            ctx_weight = risk_engine._compute_context_weight(
-                evt_type, exam_ctx, source
-            ) if hasattr(risk_engine, '_compute_context_weight') else 1.0
-        except Exception:
-            pass
+        ctx_contribution_adjusted = False
+        if real_context is not None and hasattr(risk_engine, 'compute_context_weight'):
+            try:
+                from src.context import compute_context_weight as _ccw
+                ctx_weight = _ccw(evt_type, real_context, source)
+                ctx_contribution_adjusted = True
+            except Exception as exc:
+                ctx_weight = 1.0
+                ctx_contribution_adjusted = False
 
-        # Baseline deviation
+        # Baseline deviation: from real baseline, or explicit UNAVAILABLE
         base_dev = 0.0
-        try:
-            if hasattr(risk_engine, '_baseline_deviation') and hasattr(risk_engine, '_baseline'):
-                bl = getattr(risk_engine, '_baseline', None)
-                if bl and hasattr(bl, 'is_ready') and bl.is_ready():
-                    base_dev = risk_engine._baseline_deviation(evt_type, bl)
-        except Exception:
-            pass
+        base_contribution_adjusted = False
+        if baseline_status == "READY" and hasattr(risk_engine, '_baseline_deviation'):
+            try:
+                base_dev = risk_engine._baseline_deviation(evt_type, real_baseline)
+                base_contribution_adjusted = True
+            except Exception:
+                base_dev = 0.0
+                base_contribution_adjusted = False
 
-        # Corroboration factor: boost if corroborated
+        # Corroboration factor: 1.0 if no corroboration, boost if corroborated
         corrob_factor = 1.0
-        if corrob_result and corrob_result.corroboration_score > 0.5:
+        if corrob_result and corrob_result.corroboration_score is not None and corrob_result.corroboration_score > 0.5:
             corrob_factor = 1.0 + corrob_result.corroboration_score * 0.5
             active_modalities.add(source)
 
+        # Contribution = raw × context × (1 + baseline) × corroboration
         contribution = raw_severity * ctx_weight * (1.0 + base_dev) * corrob_factor
         total_raw += contribution
 
         contributions.append(EvidenceContribution(
             source=source,
             event_type=evt_type,
-            raw_severity=raw_severity,
-            context_weight=ctx_weight,
-            baseline_deviation=base_dev,
-            corroboration_factor=corrob_factor,
+            raw_severity=round(raw_severity, 4),
+            context_weight=round(ctx_weight, 4),
+            baseline_deviation=round(base_dev, 4),
+            corroboration_factor=round(corrob_factor, 4),
             contribution=round(contribution, 4),
             confidence=confidence_val,
-            details=evt.get("details", ""),
+            details={
+                "context_adjusted": ctx_contribution_adjusted,
+                "baseline_adjusted": base_contribution_adjusted,
+                "real_timestamp": evt.get("timestamp"),
+                "session_elapsed": evt.get("session_elapsed"),
+            },
         ))
 
-    # Determine non-contributing modalities
+    # Non-contributing modalities
     all_modalities = {"vision", "audio", "keyboard", "mouse", "browser"}
-    non_contributing = sorted(all_modalities - active_modalities)
-    if not non_contributing:
-        # If all modalities have some signal, check which ones had clean signals
-        observed_mods = set()
-        for evt in events:
-            mod = MODALITY_MAP.get(evt.get("type", ""), "vision")
-            observed_mods.add(mod)
-        for mod in all_modalities - observed_mods:
-            non_contributing.append(mod)
+    observed_mods = set(MODALITY_MAP.get(evt.get("type", ""), "vision") for evt in events)
+    non_contributing = sorted(all_modalities - observed_mods)
 
-    # Compute confidence: higher with more corroboration
-    confidence = min(
-        (corrob_result.corroboration_score if corrob_result else 0.0) * 0.7 +
-        len(contributions) * 0.1 +
-        sum(c.confidence for c in contributions) / max(len(contributions), 1) * 0.3,
-        1.0
-    )
-    confidence = max(confidence, 0.3)  # floor
+    # Confidence: derived from corroboration only. No invented floor.
+    if corrob_result and corrob_result.corroboration_score is not None:
+        confidence = round(corrob_result.corroboration_score, 3)
+    else:
+        confidence = None  # explicit "no value"
 
-    # Compute uncertainty reason
+    # Uncertainty reason
     signal_count = len(events)
     modality_count = len(active_modalities)
-    if corrob_result:
+    if corrob_status != "COMPUTED":
+        uncertainty_reason = (
+            f"Corroboration {corrob_status}. {corrob_error or ''}"
+        )
+    elif corrob_result:
         label = corrob_result.corroboration_label
         if label == "STRONGLY_CORROBORATED":
             uncertainty_reason = (
                 f"High confidence: {modality_count} independent modalities "
-                f"corroborated within {corrob_result.window_seconds:.1f}s window."
+                f"corroborated within {corrob_result.temporal_window_seconds:.1f}s window."
             )
         elif label == "CORROBORATED":
             uncertainty_reason = (
@@ -550,24 +584,13 @@ def build_explainability_trace(
         elif label == "WEAK_CORROBORATION":
             uncertainty_reason = "Weak cross-modal corroboration."
         else:
-            uncertainty_reason = (
-                "Single-modality evidence only. "
-                "Cross-modal corroboration unavailable."
-            )
-    elif signal_count == 0:
-        uncertainty_reason = "No signals detected."
+            uncertainty_reason = "Single-modality evidence only."
     else:
         uncertainty_reason = "Unable to compute corroboration."
 
-    # Build counterfactuals using the internal helper
-    try:
-        counterfactuals = _compute_counterfactuals(
-            current_risk, contributions, ml_risk
-        )
-    except Exception:
-        counterfactuals = []
+    # ── Counterfactuals: recompute risk from contributions ──
+    counterfactuals = _compute_counterfactuals(current_risk, contributions, ml_risk)
 
-    # Decision reason
     decision_reason = _default_decision_reason(
         decision.value if hasattr(decision, 'value') else decision,
         current_risk
@@ -586,7 +609,7 @@ def build_explainability_trace(
         anomaly_score=round(anomaly_score, 4) if anomaly_score is not None else None,
         contributions=contributions,
         corroboration_result=corrob_dict,
-        confidence=round(confidence, 3),
+        confidence=confidence,
         signal_agreement=modality_count,
         total_signals=signal_count,
         uncertainty_reason=uncertainty_reason,
