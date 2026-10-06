@@ -238,11 +238,20 @@
 
             const container = document.getElementById('preflight-checks');
             if (result.checks) {
+                const OPTIONAL_CHECKS = ['microphone'];
                 container.innerHTML = Object.entries(result.checks).map(([name, c]) => {
-                    const icon = c.passed ? '&#x2705;' : '&#x274C;';
+                    const isOptional = OPTIONAL_CHECKS.some(k => name.toLowerCase().includes(k));
+                    let icon, color, suffix;
+                    if (c.passed) {
+                        icon = '✅'; color = 'var(--success)'; suffix = c.message;
+                    } else if (isOptional) {
+                        icon = '⚠️'; color = 'var(--warning)'; suffix = 'Not available — audio monitoring disabled';
+                    } else {
+                        icon = '❌'; color = 'var(--danger)'; suffix = c.message;
+                    }
                     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--radius);background:var(--bg-card);margin-bottom:4px;">
-                        <span style="font-size:13px;font-weight:500;">${name.charAt(0).toUpperCase() + name.slice(1)}</span>
-                        <span style="font-size:13px;${c.passed ? 'color:var(--success)' : 'color:var(--danger)'}">${icon} ${c.message}</span>
+                        <span style="font-size:13px;font-weight:500;">${name.charAt(0).toUpperCase() + name.slice(1)}${isOptional ? ' <em style="font-weight:400;color:var(--text-muted)">(optional)</em>' : ''}</span>
+                        <span style="font-size:13px;color:${color}">${icon} ${suffix}</span>
                     </div>`;
                 }).join('');
             }
@@ -254,9 +263,9 @@
                 document.getElementById('start-error').textContent = 'Some required checks failed. Please resolve them.';
             }
         } catch (e) {
-            document.getElementById('start-exam-btn').disabled = true;
-            document.getElementById('start-error').style.display = 'block';
-            document.getElementById('start-error').textContent = 'Preflight check failed: ' + e.message;
+            // If preflight API fails, still allow exam (best-effort)
+            console.warn('Preflight API failed, proceeding anyway:', e);
+            document.getElementById('start-exam-btn').disabled = false;
         }
     }
 
@@ -267,9 +276,24 @@
         examId = urlParams.get('exam_id') || urlParams.get('examId') || 'default';
         studentId = App.currentUser?.username || 'student';
 
-        // Load exam details
+        // Load exam details — auto-create demo exam if none exists
         try {
-            const examInfo = await App.apiGet(`/api/exams/${examId}`);
+            let examInfo;
+            try {
+                examInfo = await App.apiGet(`/api/exams/${examId}`);
+            } catch (notFound) {
+                // No exam at that ID — fall back to first available, or create demo
+                const examsList = await App.apiGet('/api/exams').catch(() => ({exams: []}));
+                if (examsList.exams && examsList.exams.length > 0) {
+                    examId = examsList.exams[0].exam_id;
+                    examInfo = await App.apiGet(`/api/exams/${examId}`);
+                } else {
+                    // Auto-create a demo exam so the student can proceed
+                    const demo = await App.apiPost('/api/demo/setup', {});
+                    examId = demo.exam_id;
+                    examInfo = await App.apiGet(`/api/exams/${examId}`);
+                }
+            }
             examData = examInfo;
             document.getElementById('exam-title').textContent = examData.title || 'Exam';
             document.getElementById('exam-topic').textContent = examData.topic || '';
@@ -278,9 +302,12 @@
                 questions = examData.questions;
             }
             document.getElementById('instructions-text').textContent =
-                'Complete all questions. Do not communicate with others or use unauthorized aids.';
+                'Complete all questions. Do not communicate with others or use unauthorized aids. You are being monitored via webcam.';
         } catch (e) {
+            console.error('Failed to load exam:', e);
             document.getElementById('exam-title').textContent = 'Exam (offline mode)';
+            document.getElementById('instructions-text').textContent =
+                'Exam running in offline mode. Complete all questions honestly.';
         }
 
         // Initialize local session state for preflight

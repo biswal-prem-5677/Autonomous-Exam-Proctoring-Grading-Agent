@@ -380,19 +380,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadDashboard() {
+    document.getElementById('students-list').innerHTML = '<div class="empty-panel">Loading...</div>';
     try {
-        const exams = await API.listExams();
-        if (exams.count === 0) {
+        let examsList = await API.listExams();
+        if (!examsList.exams || examsList.exams.length === 0) {
+            // No exams at all — create a demo exam so the dashboard is usable
             await API.demoSetup({});
+            examsList = await API.listExams();
         }
 
-        const examsList = await API.listExams();
-        const overview = await API.getExamOverview(examsList.exams[0].exam_id);
+        if (!examsList.exams || examsList.exams.length === 0) {
+            document.getElementById('students-list').innerHTML =
+                '<div class="empty-panel">No exams configured. Create an exam first.</div>';
+            return;
+        }
+
+        const examId = examsList.exams[0].exam_id;
+        const overview = await API.getExamOverview(examId);
         renderOverview(overview);
         allStudents = overview.students || [];
         renderStudents();
     } catch (e) {
-        showToast('Failed to load dashboard: ' + e.message, 'error');
+        console.error('Dashboard load error:', e);
+        document.getElementById('students-list').innerHTML =
+            `<div class="empty-panel" style="color:var(--danger)">Failed to load dashboard: ${e.message}</div>`;
     }
 }
 
@@ -429,7 +440,10 @@ function renderStudents() {
     }
 
     if (filtered.length === 0) {
-        list.innerHTML = `<div class="empty-panel">No students found${currentFilter !== 'all' ? ' matching filter' : ''}. Setup a demo exam first.</div>`;
+        const msg = currentFilter !== 'all'
+            ? 'No students match this filter.'
+            : 'No active student sessions yet. Students will appear here once they start an exam.';
+        list.innerHTML = `<div class="empty-panel">${msg}</div>`;
         return;
     }
 
