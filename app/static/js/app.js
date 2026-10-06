@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Autonomous Exam Proctoring & Grading Agent - Shared App JavaScript
  */
 
@@ -225,7 +225,8 @@ const App = {
     logBrowserEvent(type) { this.browserEvents.push({ type, timestamp: Date.now() }); },
 
     getBrowserStats() {
-        const elapsed = (Date.now() - this.sessionStartTime) / 1000;
+        const t0 = (this.examSession && this.examSession.startTime) ? this.examSession.startTime : this.sessionStartTime;
+        const elapsed = (Date.now() - t0) / 1000;
         return {
             tab_switches:      this.browserEvents.filter(e => e.type === 'tab_switch').length,
             window_blurs:      this.browserEvents.filter(e => e.type === 'window_blur').length,

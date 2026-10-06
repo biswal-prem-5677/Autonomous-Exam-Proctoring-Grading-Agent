@@ -472,8 +472,11 @@
         const keyboardStats = App.getKeyboardStats();
         const mouseStats    = App.getMouseStats();
 
-        // Capture webcam frame for vision analysis
-        let facePresent = true, faceCount = 1, faceConfidence = 0.9, headPose = { yaw: 0, pitch: 0, roll: 0 };
+
+        // Capture webcam frame for real vision analysis.
+        // ARCHITECTURE: Only the raw image is sent to the backend.
+        // face_present/face_count/face_confidence/head_pose are server-computed.
+        let facePresent = false, faceCount = 0, faceConfidence = 0.0, headPose = { yaw: 0, pitch: 0, roll: 0 };
         try {
             const examVideo = document.getElementById('exam-webcam');
             if (examVideo && examVideo.readyState >= 2) {
@@ -484,37 +487,40 @@
                 ctx.drawImage(examVideo, 0, 0);
                 const imageData = canvas.toDataURL('image/jpeg', 0.8);
 
+                // Send ONLY the image - backend runs real FaceTracker inference
                 const visionResult = await App.apiPost('/api/vision/analyze', {
                     session_key: App.examSession?.session_key || 'default',
                     image: imageData,
-                    face_present: true,
-                    face_count: 1,
-                    face_confidence: 0.9,
-                    head_pose: { yaw: 0, pitch: 0, roll: 0 },
                 });
 
-                facePresent = visionResult.face_present;
-                faceCount = visionResult.face_count;
-                faceConfidence = visionResult.face_confidence;
-                headPose = visionResult.head_pose || { yaw: 0 };
+                const visionStatus = visionResult.vision_status || 'UNKNOWN';
+                if (visionStatus === 'OK' && visionResult.image_processed) {
+                    // Use backend-inferred values only - never client-supplied
+                    facePresent    = visionResult.face_present;
+                    faceCount      = visionResult.face_count;
+                    faceConfidence = visionResult.face_confidence;
+                    headPose       = visionResult.head_pose || { yaw: 0, pitch: 0, roll: 0 };
+                } else if (visionStatus === 'VISION_LIB_UNAVAILABLE') {
+                    addProctoringEvent('Vision Unavailable', 'info', 'Server-side vision library not installed');
+                } else if (visionStatus !== 'OK') {
+                    console.warn('Vision pipeline status:', visionStatus);
+                }
 
-                // Update event log with vision events
                 if (visionResult.events && visionResult.events.length > 0) {
                     visionResult.events.forEach(evt => {
                         addProctoringEvent(
                             evt.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
                             evt.confidence > 0.7 ? 'danger' : 'warning',
-                            `Confidence: ${Math.round(evt.confidence * 100)}%`
+                            'Confidence: ' + Math.round(evt.confidence * 100) + '%'
                         );
                     });
                 }
 
-                // Update risk display with vision + behavioral combined risk
                 const visionRisk = visionResult.risk_contribution || 0;
                 updateRiskDisplay(visionRisk);
             }
         } catch (e) {
-            // Vision analysis failed, continue with behavioral only
+            // Vision analysis failed - continue with behavioral-only proctoring
             console.warn('Vision analysis failed:', e.message);
         }
 
@@ -640,10 +646,10 @@
                         return 'other';
                     }));
                     const modalityCount = modalities.size || 1;
-                    const corroborationScores = { 1: 45, 2: 62, 3: 78, 4: 87, 5: 93, 6: 97 };
-                    const confPct = corroborationScores[Math.min(modalityCount, 6)] || 45;
+                    // HONEST FALLBACK: no manufactured confidence numbers.
+                    // We show modality count from real history but mark confidence as unavailable.
                     document.getElementById('trace-confidence').innerHTML =
-                        confPct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span>';
+                        '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">No trace data</span>';
                     document.getElementById('trace-corroboration').textContent = modalityCount;
                     renderContributions(events);
                     renderCorroboration(events);
@@ -680,25 +686,26 @@
             rapid_movement: 'Mouse', idle_mouse: 'Mouse', right_click_spam: 'Mouse',
             tab_switch: 'Browser', window_blur: 'Browser', fullscreen_exit: 'Browser',
         };
-        const severityMap = {
-            face_absent: 30, multiple_faces: 50, head_turned: 20, gaze_away: 15,
-            speech_detected: 25, loud_audio: 20,
-            tab_switch: 25, window_blur: 15, fullscreen_exit: 35,
-            copy_paste: 35, paste_detected: 30,
-        };
-
+        // Use real contribution values from IntegrityDecisionTrace when present.
+        // Events from history fallback may not have contribution; show raw severity only if available.
         list.innerHTML = events.map(e => {
             const t = e.type || 'unknown';
-            const sev = severityMap[t] || 20;
             const mod = modalityNames[t] || 'Other';
-            const color = modalityColors[Object.keys(modalityNames).find(k => t.includes(k))] || modalityColors.other;
+            const color = modalityColors[mod.toLowerCase()] || modalityColors.other;
+            // Use real weighted contribution from trace (0-1), or raw_severity, or omit
+            const contrib = e.contribution != null ? e.contribution
+                          : e.raw_severity  != null ? e.raw_severity
+                          : null;
+            const contribHtml = contrib != null
+                ? `<div style="font-size:13px;font-weight:600;color:var(--danger);">+${Math.round(contrib * 100)}%</div>`
+                : `<div style="font-size:11px;color:var(--text-muted);">risk: --</div>`;
             return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
                 <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:13px;font-weight:500;">${t.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</div>
                     <div style="font-size:11px;color:var(--text-muted);">${mod}</div>
                 </div>
-                <div style="font-size:13px;font-weight:600;color:var(--danger);">+${sev}%</div>
+                ${contribHtml}
             </div>`;
         }).join('');
     }
