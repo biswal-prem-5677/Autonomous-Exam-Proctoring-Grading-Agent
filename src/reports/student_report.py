@@ -18,9 +18,9 @@ class StudentReportGenerator:
         self.report_data: Dict[str, Any] = {}
 
     def generate(self, grading_results: Dict[str, Any],
-                 proctoring_summary: Dict[str, Any] = None,
-                 prediction: Dict[str, Any] = None,
-                 knowledge_state: Dict[str, float] = None) -> Dict[str, Any]:
+                 proctoring_summary: Optional[Dict[str, Any]] = None,
+                 prediction: Optional[Any] = None,
+                 knowledge_state: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """Generate a comprehensive student report.
 
         Args:
@@ -34,13 +34,21 @@ class StudentReportGenerator:
         """
         student_id = proctoring_summary.get("student_id", "Unknown") if proctoring_summary else "Unknown"
 
+        pred_payload: Dict[str, Any] = {}
+        if isinstance(prediction, dict):
+            pred_payload = prediction
+        elif hasattr(prediction, "tolist"):
+            pred_payload = {"predictions": prediction.tolist()}
+        elif prediction is not None:
+            pred_payload = {"prediction": prediction}
+
         report = {
             "report_type": "student_report",
             "generated_at": datetime.now().isoformat(),
             "student_id": student_id,
             "grade_summary": self._build_grade_summary(grading_results),
             "proctoring_summary": proctoring_summary or {},
-            "prediction": prediction or {},
+            "prediction": pred_payload,
             "knowledge_state": knowledge_state or {},
             "recommendations": self._build_recommendations(
                 grading_results, proctoring_summary, knowledge_state
@@ -63,8 +71,8 @@ class StudentReportGenerator:
         }
 
     def _build_recommendations(self, grading_results: Dict,
-                               proctoring_summary: Dict = None,
-                               knowledge_state: Dict = None) -> List[str]:
+                               proctoring_summary: Optional[Dict] = None,
+                               knowledge_state: Optional[Dict] = None) -> List[str]:
         """Generate actionable improvement recommendations."""
         recs = []
         percentage = grading_results.get("percentage", 0.0)

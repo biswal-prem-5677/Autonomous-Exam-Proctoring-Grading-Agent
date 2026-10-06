@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -24,10 +25,17 @@ class EvidenceEntry:
     description: str
     signal_source: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
+    entry_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    review_state: str = "pending"
+    review_note: str = ""
+    reviewed_by: str = ""
+    reviewed_at: Optional[datetime] = None
 
     def to_dict(self) -> Dict:
         d = asdict(self)
         d["timestamp_iso"] = datetime.fromtimestamp(self.timestamp).isoformat()
+        if self.reviewed_at:
+            d["reviewed_at"] = self.reviewed_at.isoformat()
         return d
 
 

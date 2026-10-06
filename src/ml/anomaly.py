@@ -12,9 +12,15 @@ class AnomalyDetector:
     """
 
     def __init__(self, zscore_threshold: float = 2.5,
-                 mahalanobis_confidence: float = 0.95):
+                 mahalanobis_confidence: float = 0.95,
+                 method: str = "zscore",
+                 threshold: Optional[float] = None,
+                 **kwargs):
+        if threshold is not None:
+            zscore_threshold = threshold
         self.zscore_threshold = zscore_threshold
         self.mahalanobis_confidence = mahalanobis_confidence
+        self.method = method
         self._mean: Optional[np.ndarray] = None
         self._cov: Optional[np.ndarray] = None
         self._cov_inv: Optional[np.ndarray] = None

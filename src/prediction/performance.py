@@ -131,12 +131,12 @@ class KnowledgeTracer:
         """Initialize knowledge state for a topic."""
         self._knowledge[topic] = mastery if mastery is not None else self.initial_mastery
 
-    def update(self, topic: str, correct: bool) -> float:
+    def update(self, topic: str, correct: Any) -> float:
         """Update knowledge state after answering a question.
 
         Args:
             topic: Topic identifier
-            correct: Whether the answer was correct
+            correct: Whether the answer was correct (bool or float in [0, 1])
 
         Returns:
             Updated mastery probability [0, 1]
@@ -145,12 +145,8 @@ class KnowledgeTracer:
             self._knowledge[topic] = self.initial_mastery
 
         current = self._knowledge[topic]
-        if correct:
-            # Increase mastery (Bayesian-like update toward 1)
-            new_mastery = current + self.learning_rate * (1 - current)
-        else:
-            # Decrease mastery toward 0
-            new_mastery = current - self.learning_rate * current
+        score_val = float(correct)
+        new_mastery = current + self.learning_rate * (score_val - current)
 
         self._knowledge[topic] = max(0.0, min(1.0, new_mastery))
         return self._knowledge[topic]

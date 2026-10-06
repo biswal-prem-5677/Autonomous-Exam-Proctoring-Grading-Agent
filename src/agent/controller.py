@@ -51,7 +51,7 @@ class ProctoringAgent:
     Loop: OBSERVE → PERCEIVE → FEATUREIZE → PREDICT → REASON → DECIDE → ACT → repeat
     """
 
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.session_id = str(uuid.uuid4())[:8]
 
@@ -89,7 +89,6 @@ class ProctoringAgent:
         # ML models (set externally after training)
         self._logistic_model: Optional[LogisticRegressionScratch] = None
         self._anomaly_model: Optional[AnomalyDetector] = None
-        self.risk_engine.set_logistic_model(self._logistic_model)
 
         # State
         self._state = AgentState.NORMAL
@@ -108,8 +107,8 @@ class ProctoringAgent:
         # Last decision trace (for explainability)
         self._last_trace: Optional[Dict[str, Any]] = None
 
-    def set_models(self, logistic: LogisticRegressionScratch = None,
-                   anomaly: AnomalyDetector = None) -> None:
+    def set_models(self, logistic: Optional[LogisticRegressionScratch] = None,
+                   anomaly: Optional[AnomalyDetector] = None) -> None:
         """Attach trained ML models."""
         if logistic:
             self._logistic_model = logistic
@@ -118,8 +117,8 @@ class ProctoringAgent:
             self._anomaly_model = anomaly
             self.risk_engine.set_anomaly_model(anomaly)
 
-    def set_callbacks(self, on_state_change: Callable = None,
-                      on_alert: Callable = None) -> None:
+    def set_callbacks(self, on_state_change: Optional[Callable] = None,
+                      on_alert: Optional[Callable] = None) -> None:
         """Set event callbacks."""
         self._on_state_change = on_state_change
         self._on_alert = on_alert
@@ -413,7 +412,7 @@ class ProctoringAgent:
     def _predict(self, features: Optional[Any],
                  signals: Dict[str, Any]) -> Dict[str, Any]:
         """PREDICT: Run ML models on features."""
-        predictions = {
+        predictions: Dict[str, Any] = {
             "logistic_risk": None,
             "anomaly_score": None,
             "anomaly_detected": False,
@@ -570,7 +569,7 @@ class ProctoringAgent:
         return new_state
 
     def _act(self, events: List[Dict], risk_score: float,
-             state: AgentState, result_payload: Dict[str, Any] = None) -> List[str]:
+             state: AgentState, result_payload: Optional[Dict[str, Any]] = None) -> List[str]:
         """ACT: Execute decisions — record evidence, trigger alerts, commit to audit chain."""
         actions = []
 

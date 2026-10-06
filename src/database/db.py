@@ -156,9 +156,9 @@ class Database:
 
     def add_question(self, session_id: str, question_id: str, qtype: str,
                      text: str, marks: float = 1.0,
-                     correct_answer: str = None, tolerance: float = 0.01,
-                     keywords: List[str] = None, reference_answer: str = None,
-                     options: List[str] = None, position: int = 0) -> None:
+                     correct_answer: Optional[str] = None, tolerance: float = 0.01,
+                     keywords: Optional[List[str]] = None, reference_answer: Optional[str] = None,
+                     options: Optional[List[str]] = None, position: int = 0) -> None:
         self._conn.execute(
             """INSERT INTO questions
                (question_id, session_id, type, text, options, correct_answer,
@@ -192,9 +192,9 @@ class Database:
     # ─── Answers ─────────────────────────────────────────────────────────────
 
     def record_answer(self, session_id: str, question_id: str,
-                      student_answer: str, score: float = None,
-                      max_score: float = None, grading_method: str = None,
-                      grading_details: Dict = None) -> str:
+                      student_answer: str, score: Optional[float] = None,
+                      max_score: Optional[float] = None, grading_method: Optional[str] = None,
+                      grading_details: Optional[Dict] = None) -> str:
         answer_id = str(uuid.uuid4())[:12]
         self._conn.execute(
             """INSERT INTO answers
@@ -241,7 +241,7 @@ class Database:
     # ─── Events ──────────────────────────────────────────────────────────────
 
     def add_event(self, session_id: str, event_type: str,
-                  confidence: float = None, details: Dict = None) -> str:
+                  confidence: Optional[float] = None, details: Optional[Dict] = None) -> str:
         event_id = str(uuid.uuid4())[:12]
         self._conn.execute(
             """INSERT INTO events (event_id, session_id, event_type, confidence, details)
@@ -284,7 +284,7 @@ class Database:
 
     def save_prediction(self, session_id: str, predicted_score: float,
                         confidence: float, method: str,
-                        question_id: str = None) -> str:
+                        question_id: Optional[str] = None) -> str:
         pred_id = str(uuid.uuid4())[:12]
         self._conn.execute(
             """INSERT INTO predictions

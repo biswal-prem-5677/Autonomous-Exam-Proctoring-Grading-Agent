@@ -93,22 +93,41 @@ class KeywordCoverageScorer:
     def __init__(self, partial_threshold: float = 0.6):
         self.partial_threshold = partial_threshold
 
-    def score(self, student_answer: str, keywords: List[str]) -> Dict:
-        """Score an answer based on keyword coverage."""
+    def score(self, *args, **kwargs) -> Dict:
+        """Score an answer based on keyword coverage.
+        
+        Supports:
+            score(student_answer, keywords)
+            score(reference_answer, student_answer, keywords)
+        """
+        if len(args) >= 3:
+            student_answer = args[1]
+            keywords = args[2]
+        elif len(args) == 2:
+            student_answer = args[0]
+            keywords = args[1]
+        else:
+            student_answer = kwargs.get("student_answer", "")
+            keywords = kwargs.get("keywords", [])
+
+        keywords = keywords or []
         if not keywords:
             return {
                 "coverage": 1.0,
                 "matched": [],
+                "found": [],
                 "missing": [],
                 "score": 1.0,
+                "total_keywords": 0,
+                "matched_count": 0,
             }
 
-        answer_lower = student_answer.lower()
+        answer_lower = str(student_answer).lower()
         matched = []
         missing = []
 
         for kw in keywords:
-            if kw.lower() in answer_lower:
+            if str(kw).lower() in answer_lower:
                 matched.append(kw)
             else:
                 missing.append(kw)
@@ -118,7 +137,9 @@ class KeywordCoverageScorer:
         return {
             "coverage": coverage,
             "matched": matched,
+            "found": matched,
             "missing": missing,
+            "score": coverage,
             "total_keywords": len(keywords),
             "matched_count": len(matched),
         }

@@ -15,9 +15,23 @@
     {% block body %}{% endblock %}
 
     <script src="/static/js/app.js"></script>
+    <script id="app-bootstrap-data" type="application/json">
+        {"currentUser": {{ current_user | default({}) | tojson }}, "authToken": "{{ token | default('') }}"}
+    </script>
     <script>
-        App.currentUser = {{ current_user | default({}) | tojson }};
-        App.authToken = "{{ token | default('') }}";
+        (function() {
+            try {
+                var el = document.getElementById("app-bootstrap-data");
+                if (el && el.textContent) {
+                    var data = JSON.parse(el.textContent);
+                    App.currentUser = data.currentUser || {};
+                    App.authToken = data.authToken || "";
+                }
+            } catch (e) {
+                App.currentUser = {};
+                App.authToken = "";
+            }
+        })();
     </script>
     {% block scripts %}{% endblock %}
 </body>

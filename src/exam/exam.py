@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List, Any
-from src.models.models import ExamSession, AgentState, ProctoringEvent, Question
+from src.models.models import Exam, ExamSession, AgentState, ProctoringEvent, Question
 from src.exam.session import ExamSessionManager
 from src.exam.questions import QuestionBank
 from src.agent.risk import RiskEngine
@@ -121,20 +121,21 @@ class ExamManager:
     def __init__(self, config: dict = None):
         self.config = config or {}
         self._controllers: dict[str, ExamController] = {}
-        self._exams: dict[str, object] = {}
+        self._exams: dict[str, Exam] = {}
 
-    def get_exam(self, exam_id: str):
+    def get_exam(self, exam_id: Optional[str]) -> Optional[Exam]:
         """Get an exam by ID."""
+        if not exam_id:
+            return None
         return self._exams.get(exam_id)
 
-    def list_exams(self) -> list:
+    def list_exams(self) -> List[Exam]:
         """List all exams."""
         return list(self._exams.values())
 
     def create_exam(self, exam_id: str, title: str, duration_minutes: int,
-                    questions: list) -> object:
+                    questions: list) -> Exam:
         """Create a new exam."""
-        from src.models.models import Exam
         exam = Exam(
             exam_id=exam_id,
             title=title,

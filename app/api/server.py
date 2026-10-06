@@ -61,7 +61,7 @@ from src.baseline import StudentBaseline
 app = Flask(__name__,
             static_folder="../static",
             template_folder="../templates")
-CORS(app)
+CORS(app)  # type: ignore
 
 # Global state
 _config = load_config()
@@ -837,7 +837,7 @@ def examiner_overview(exam_id):
         if progress >= 100:
             # Has completed — compute score from grading
             graded = _grade_session_internal(student_id, exam_id, exam)
-            score_pct = graded.get("percentage", 0.0)
+            score_pct = float(graded.get("percentage", 0.0))
             total_score += score_pct
             scored_count += 1
         else:
@@ -956,7 +956,18 @@ def generate_student_report():
     knowledge_state = kt.get_all_mastery() if kt else {}
 
     predictor = _performance_predictors.get(session_key)
-    prediction = predictor.predict(grading_results) if predictor else {}
+    prediction: Dict[str, Any] = {}
+    if predictor:
+        try:
+            pred_res = predictor.predict(grading_results)
+            if isinstance(pred_res, dict):
+                prediction = pred_res
+            elif hasattr(pred_res, "tolist"):
+                prediction = {"predicted_scores": pred_res.tolist()}
+            else:
+                prediction = {"predicted_scores": pred_res}
+        except Exception:
+            prediction = {}
 
     generator = StudentReportGenerator()
     report = generator.generate(
@@ -1075,8 +1086,8 @@ def generate_training_data():
         "feature_count": len(feature_names),
         "feature_names": feature_names,
         "class_distribution": {
-            "normal": int(sum(1 for l in y if l == 0)),
-            "suspicious": int(sum(1 for l in y if l == 1)),
+            "normal": sum(1 for l in y if l == 0),
+            "suspicious": sum(1 for l in y if l == 1),
         },
         "sample_preview": X[:5].tolist() if hasattr(X, "tolist") else X[:5],
     })
@@ -1143,7 +1154,7 @@ def train_models():
     return jsonify({
         "logistic_regression": {
             "metrics": lr_metrics,
-            "feature_weights": dict(zip(feature_names[:len(lr.weights)], lr.weights.tolist())),
+            "feature_weights": dict(zip(feature_names[:len(lr.weights)] if lr.weights is not None else [], lr.weights.tolist() if lr.weights is not None else [])),
         },
         "anomaly_detection": {
             "metrics": anomaly_metrics,
