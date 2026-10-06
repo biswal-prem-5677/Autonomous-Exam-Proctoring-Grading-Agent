@@ -299,7 +299,7 @@ class ProgrammingGrader:
         local_scope = {}
 
 
-        timeout_sec = max(0.2, float(self.execution_timeout_seconds))
+        timeout_sec = max(0.2, float(self.timeout))
 
         # Enforce initialization timeout
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:

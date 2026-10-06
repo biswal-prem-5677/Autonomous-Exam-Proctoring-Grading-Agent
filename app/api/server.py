@@ -125,6 +125,46 @@ def _get_db() -> Database:
     return _db_instance
 
 
+def _recover_sessions_from_db() -> None:
+    """Repopulate in-memory lightweight session metadata from the DB.
+
+    This is called once at startup.  It does NOT recreate ProctoringAgent
+    objects (those require the live exam controller), but it does restore
+    the minimal `_active_sessions` dict entries needed for the examiner
+    dashboard and session-status endpoints to report previously-started
+    sessions that survived a server restart.
+    """
+    db = _get_db()
+    try:
+        recovered = db.get_active_sessions_meta()
+        for row in recovered:
+            skey = row["session_key"]
+            if skey not in _active_sessions:
+                # Re-populate with the persisted lightweight dict.  The
+                # "controller" key is intentionally absent — endpoints that
+                # strictly need it will return 404/error, which is correct
+                # behaviour for sessions that pre-date the current process.
+                _active_sessions[skey] = {
+                    "student_id": row["student_id"],
+                    "exam_id": row["exam_id"],
+                    "session_id": row["session_id"],
+                    "created_at": row.get("created_at", ""),
+                    "started_at": row.get("created_at", ""),
+                    **row.get("meta", {}),
+                    "_recovered": True,  # flag: no live controller attached
+                }
+    except Exception:
+        # DB may not have the new table yet (first run before migration);
+        # gracefully skip — sessions are simply not recovered.
+        pass
+
+
+# Eagerly open the DB so schema migrations run at import time rather than on
+# the first request (avoids a race condition under concurrent startup).
+_get_db()
+_recover_sessions_from_db()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PAGE ROUTES — serve the HTML frontend
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -403,6 +443,22 @@ def create_session():
         "started_at": session_created_at,
     }
 
+    # Persist session metadata to SQLite so it survives server restarts.
+    try:
+        _get_db().upsert_session_meta(
+            session_key=session_key,
+            session_id=session.session_id,
+            student_id=student_id,
+            exam_id=exam_id,
+            meta={
+                "started_at": session_created_at,
+                "duration_minutes": duration,
+            },
+            is_active=True,
+        )
+    except Exception:
+        pass  # DB failure must not block exam start
+
     # Initialize proctoring agent for this session with active trained ML models
     agent = _create_proctoring_agent(_config)
     _proctoring_agents[session_key] = agent
@@ -494,6 +550,12 @@ def end_session(student_id, exam_id):
 
     controller = session_info["controller"]
     session = controller.end_exam()
+
+    # Deactivate the DB session-meta record so it is not recovered on restart.
+    try:
+        _get_db().deactivate_session_meta(session_key)
+    except Exception:
+        pass
 
     return jsonify({
         "session_id": session.session_id,
