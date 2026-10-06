@@ -12,11 +12,11 @@ Zero external dependencies — pure local Python execution.
 
 import ast
 import time
-import math
 import traceback
-import concurrent.futures
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable
+
+from src.grading.sandbox import run_in_sandbox, SandboxResult
 
 
 @dataclass
@@ -286,59 +286,44 @@ class ProgrammingGrader:
         if cyclomatic > max_allowed_complexity:
             complexity_ratio = max(0.2, 1.0 - (cyclomatic - max_allowed_complexity) * 0.05)
 
-        # 4. Safe execution of test suites
-        # Execute in isolated globals dict without dangerous primitives
-        builtins_dict = __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
-        safe_globals = {
-            "__builtins__": {
-                k: v for k, v in builtins_dict.items()
-                if k not in _SecurityAuditor.FORBIDDEN_CALLS
-            },
-            "math": math,
-        }
-        local_scope = {}
+        # 4. Execute tests in isolated subprocess sandbox
+        #    Student code never runs inside the Flask process.
+        all_tests = [
+            {"name": t.get("name", f"pub_{i}"),
+             "input": t.get("input", ()),
+             "expected": t.get("expected"),
+             "kwargs": t.get("kwargs", {}),
+             "is_hidden": False,
+             "is_edge": False}
+            for i, t in enumerate(public_tests)
+        ] + [
+            {"name": t.get("name", f"hid_{i}"),
+             "input": t.get("input", ()),
+             "expected": t.get("expected"),
+             "kwargs": t.get("kwargs", {}),
+             "is_hidden": True,
+             "is_edge": False}
+            for i, t in enumerate(hidden_tests)
+        ] + [
+            {"name": t.get("name", f"edge_{i}"),
+             "input": t.get("input", ()),
+             "expected": t.get("expected"),
+             "kwargs": t.get("kwargs", {}),
+             "is_hidden": False,
+             "is_edge": True}
+            for i, t in enumerate(edge_cases)
+        ]
 
+        sandbox_result: SandboxResult = run_in_sandbox(
+            code=code_str,
+            function_name=entry_function_name,
+            tests=all_tests,
+            timeout_seconds=max(3.0, self.timeout * max(1, len(all_tests))),
+        )
 
-        timeout_sec = max(0.2, float(self.timeout))
-
-        # Enforce initialization timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            init_future = executor.submit(exec, code_str, safe_globals, local_scope)
-            try:
-                init_future.result(timeout=timeout_sec)
-            except concurrent.futures.TimeoutError:
-                return ProgrammingGradingResult(
-                    score=0.0,
-                    max_score=marks,
-                    percentage=0.0,
-                    syntax_valid=True,
-                    security=security_report,
-                    cyclomatic_complexity=cyclomatic,
-                    loop_nesting_depth=loop_depth,
-                    total_tests=len(public_tests) + len(hidden_tests) + len(edge_cases),
-                    passed_tests=0,
-                    test_results=[],
-                    style_score=0.0,
-                    explanation=f"Execution timed out during initialization (> {timeout_sec}s). Infinite loop or excessive computation detected.",
-                )
-            except Exception as exc:
-                return ProgrammingGradingResult(
-                    score=0.0,
-                    max_score=marks,
-                    percentage=0.0,
-                    syntax_valid=True,
-                    security=security_report,
-                    cyclomatic_complexity=cyclomatic,
-                    loop_nesting_depth=loop_depth,
-                    total_tests=len(public_tests) + len(hidden_tests) + len(edge_cases),
-                    passed_tests=0,
-                    test_results=[],
-                    style_score=style_score,
-                    explanation=f"Runtime error during script initialization: {str(exc)}",
-                )
-
-        fn = local_scope.get(entry_function_name)
-        if not callable(fn):
+        # --- Handle sandbox-level failures -----------------------------------
+        if not sandbox_result.success:
+            error_msg = sandbox_result.sandbox_error or "Unknown sandbox error"
             return ProgrammingGradingResult(
                 score=0.0,
                 max_score=marks,
@@ -347,93 +332,76 @@ class ProgrammingGrader:
                 security=security_report,
                 cyclomatic_complexity=cyclomatic,
                 loop_nesting_depth=loop_depth,
-                total_tests=len(public_tests) + len(hidden_tests) + len(edge_cases),
+                total_tests=len(all_tests),
                 passed_tests=0,
                 test_results=[],
-                style_score=0.0,
-                explanation=f"Entry function '{entry_function_name}' not defined or not callable.",
+                style_score=style_score,
+                explanation=error_msg,
             )
 
+        # --- Handle worker-level init error (exec / function not found) ------
+        if sandbox_result.init_error:
+            return ProgrammingGradingResult(
+                score=0.0,
+                max_score=marks,
+                percentage=0.0,
+                syntax_valid=True,
+                security=security_report,
+                cyclomatic_complexity=cyclomatic,
+                loop_nesting_depth=loop_depth,
+                total_tests=len(all_tests),
+                passed_tests=0,
+                test_results=[],
+                style_score=style_score,
+                explanation=f"Runtime error: {sandbox_result.init_error}",
+            )
+
+        # --- Map sandbox results to TestCaseResult ---------------------------
         test_results: List[TestCaseResult] = []
         regular_passed = 0
         regular_total = len(public_tests) + len(hidden_tests)
         edge_passed = 0
         edge_total = len(edge_cases)
 
-        def _run_test_item(test_spec: Dict[str, Any], is_hidden: bool, is_edge: bool):
-            nonlocal regular_passed, edge_passed
-            name = test_spec.get("name", f"test_{len(test_results)+1}")
-            args = test_spec.get("input", ())
-            if not isinstance(args, (list, tuple)):
-                args = (args,)
-            kwargs = test_spec.get("kwargs", {})
-            expected = test_spec.get("expected")
-
-            t0 = time.perf_counter()
-            err_msg = None
-            actual = None
-            passed = False
-
-            try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as item_executor:
-                    future = item_executor.submit(fn, *args, **kwargs)
-                    actual = future.result(timeout=timeout_sec)
-                t_elapsed = (time.perf_counter() - t0) * 1000.0
-                passed = actual == expected
-            except concurrent.futures.TimeoutError:
-                t_elapsed = (time.perf_counter() - t0) * 1000.0
-                err_msg = f"TimeoutError: Execution exceeded limit of {timeout_sec}s"
-                passed = False
-            except Exception as e:
-                t_elapsed = (time.perf_counter() - t0) * 1000.0
-                err_msg = f"{type(e).__name__}: {str(e)}"
-                passed = False
-
-            if passed:
-                if is_edge:
+        for sr in sandbox_result.results:
+            test_results.append(TestCaseResult(
+                name=sr.name,
+                is_hidden=sr.is_hidden,
+                is_edge_case=sr.is_edge,
+                passed=sr.passed,
+                input_args="[HIDDEN]" if sr.is_hidden else None,
+                expected_output="[HIDDEN]" if sr.is_hidden else sr.expected,
+                actual_output="[HIDDEN]" if sr.is_hidden else sr.actual,
+                execution_time_ms=sr.time_ms,
+                error_message=sr.error,
+            ))
+            if sr.passed:
+                if sr.is_edge:
                     edge_passed += 1
                 else:
                     regular_passed += 1
-
-            test_results.append(TestCaseResult(
-                name=name,
-                is_hidden=is_hidden,
-                is_edge_case=is_edge,
-                passed=passed,
-                input_args=args if not is_hidden else "[HIDDEN]",
-                expected_output=expected if not is_hidden else "[HIDDEN]",
-                actual_output=actual if not is_hidden else "[HIDDEN]",
-                execution_time_ms=t_elapsed,
-                error_message=err_msg,
-            ))
-
-        for t in public_tests:
-            _run_test_item(t, is_hidden=False, is_edge=False)
-        for t in hidden_tests:
-            _run_test_item(t, is_hidden=True, is_edge=False)
-        for t in edge_cases:
-            _run_test_item(t, is_hidden=False, is_edge=True)
 
         # 5. Compute composite score
         reg_ratio = (regular_passed / regular_total) if regular_total > 0 else 1.0
         edge_ratio = (edge_passed / edge_total) if edge_total > 0 else 1.0
 
         total_ratio = (
-            self.w_tests * reg_ratio +
-            self.w_edge * edge_ratio +
-            self.w_comp * complexity_ratio +
-            self.w_style * style_score
+            self.w_tests * reg_ratio
+            + self.w_edge * edge_ratio
+            + self.w_comp * complexity_ratio
+            + self.w_style * style_score
         )
         awarded_marks = min(marks, max(0.0, total_ratio * marks))
-        total_tests = regular_total + edge_total
-        passed_tests = regular_passed + edge_passed
+        total_tests_count = regular_total + edge_total
+        passed_tests_count = regular_passed + edge_passed
         percentage = (awarded_marks / marks * 100.0) if marks > 0 else 0.0
 
         expl = (
             f"Score: {awarded_marks:.1f}/{marks:.1f} ({percentage:.0f}%). "
-            f"Passed {passed_tests}/{total_tests} test cases "
+            f"Passed {passed_tests_count}/{total_tests_count} test cases "
             f"(Regular: {regular_passed}/{regular_total}, Edge: {edge_passed}/{edge_total}). "
-            f"Cyclomatic complexity: {cyclomatic}, Max loop depth: {loop_depth}."
+            f"Cyclomatic complexity: {cyclomatic}, Max loop depth: {loop_depth}. "
+            f"[Executed in isolated subprocess sandbox]"
         )
 
         return ProgrammingGradingResult(
@@ -444,8 +412,8 @@ class ProgrammingGrader:
             security=security_report,
             cyclomatic_complexity=cyclomatic,
             loop_nesting_depth=loop_depth,
-            total_tests=total_tests,
-            passed_tests=passed_tests,
+            total_tests=total_tests_count,
+            passed_tests=passed_tests_count,
             test_results=test_results,
             style_score=style_score,
             explanation=expl,
