@@ -429,7 +429,7 @@ def create_session():
         return jsonify({"error": "Failed to create session"}), 500
 
     # Capture session creation time before any processing
-    session_created_at = session.created_at if hasattr(session, "created_at") else datetime.now().isoformat()
+    session_created_at = getattr(session, "created_at", None) or datetime.now().isoformat()
 
     controller.start_exam()
 
@@ -1981,7 +1981,7 @@ def update_evidence_entry(session_id, entry_id):
             if e.entry_id == entry_id:
                 e.review_state = data.get("review_state", e.review_state)
                 e.review_note = data.get("review_note", e.review_note)
-                e.reviewed_by = user.get("full_name", user.get("username"))
+                e.reviewed_by = str(user.get("full_name") or user.get("username") or "")
                 e.reviewed_at = datetime.utcnow()
                 return jsonify({"entry": e.to_dict(), "message": "Updated"})
     return jsonify({"error": "Entry not found"}), 404

@@ -241,6 +241,7 @@ def cmd_eval(args):
     pipeline = TrainingPipeline(config)
     pipeline.X_train, pipeline.X_test = X_train, X_test
     pipeline.y_train, pipeline.y_test = y_train, y_test
+    assert pipeline.logistic_model is not None and pipeline.anomaly_detector is not None
     pipeline.logistic_model.fit(X_train, y_train)
     pipeline.anomaly_detector.fit(X_train[y_train == 0])
 
@@ -295,11 +296,30 @@ def _events_to_signals(events: list) -> dict:
     return signals
 
 
+def cmd_serve(args):
+    """Launch the Flask web application."""
+    from app.api.server import app
+
+    host = getattr(args, "host", "0.0.0.0")
+    port = getattr(args, "port", 5000)
+    debug = getattr(args, "debug", False)
+    print("=" * 60)
+    print("  AUTONOMOUS EXAM PROCTORING & GRADING AGENT")
+    print(f"  Web Application: http://{host}:{port}")
+    print("=" * 60)
+    app.run(host=host, port=port, debug=debug)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Autonomous Exam Proctoring & Grading Agent",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
+
+    p_serve = sub.add_parser("serve", help="Launch the web application (default)")
+    p_serve.add_argument("--host", default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
+    p_serve.add_argument("--port", type=int, default=5000, help="Port (default: 5000)")
+    p_serve.add_argument("--debug", action="store_true", help="Enable debug mode")
 
     p_demo = sub.add_parser("demo", help="Run full demo with sample data")
     p_demo.add_argument("--output", "-o", help="Save reports to JSON file")
@@ -318,7 +338,9 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "demo":
+    if args.command == "serve" or args.command is None:
+        cmd_serve(args)
+    elif args.command == "demo":
         cmd_demo(args)
     elif args.command == "grade":
         cmd_grade(args)
