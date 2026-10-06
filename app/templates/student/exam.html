@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Exam — Proctoring Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
 </head>
@@ -635,7 +638,7 @@
         container.style.display = 'block';
 
         const modalityColors = {
-            vision: '#3b82f6', audio: '#8b5cf6', keyboard: '#10b981',
+            vision: '#D95D39', audio: '#8b5cf6', keyboard: '#10b981',
             mouse: '#f59e0b', browser: '#ef4444', other: '#6b7280'
         };
         const modalityNames = {
@@ -674,7 +677,7 @@
         if (!container || !timeline || events.length === 0) return;
         container.style.display = 'block';
 
-        const modColors = { vision: '#3b82f6', audio: '#8b5cf6', keyboard: '#10b981', mouse: '#f59e0b', browser: '#ef4444' };
+        const modColors = { vision: '#D95D39', audio: '#8b5cf6', keyboard: '#10b981', mouse: '#f59e0b', browser: '#ef4444' };
         const modKey = { face_absent: 'vision', multiple_faces: 'vision', head_turned: 'vision', gaze_away: 'vision',
             speech_detected: 'audio', loud_audio: 'audio',
             tab_switch: 'browser', window_blur: 'browser', fullscreen_exit: 'browser',

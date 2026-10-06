@@ -7,32 +7,38 @@
    CSS Variables
    ───────────────────────────────────────────────────────────────────── */
 :root {
-    /* Colors - Dark Theme */
-    --bg-primary: #0a0a0f;
-    --bg-secondary: #12121a;
-    --bg-tertiary: #1a1a24;
-    --bg-card: #16161f;
-    --bg-hover: #1e1e2a;
-    --bg-input: #0d0d12;
+    /* Colors - The Terracotta & Charcoal (Modern Institutional) */
+    --bg-primary: #F9F6F0;           /* Soft Cream Canvas */
+    --bg-secondary: #F3EFEA;         /* Warm Alabaster */
+    --bg-tertiary: #EAE4DC;
+    --bg-card: #FFFFFF;              /* Pure Alabaster Cards */
+    --bg-hover: #FCFAF7;
+    --bg-input: #FFFFFF;
 
-    /* Accent Colors */
-    --accent-primary: #22d3ee;      /* Cyan - main accent */
-    --accent-secondary: #a78bfa;    /* Violet - secondary */
-    --accent-success: #34d399;      /* Emerald - success */
-    --accent-warning: #fbbf24;      /* Amber - warning */
-    --accent-danger: #f87171;       /* Red - danger */
-    --accent-info: #60a5fa;         /* Blue - info */
+    /* Secondary: Deep Obsidian Charcoal */
+    --secondary: #1E293B;
+    --secondary-dark: #0F172A;
+    --secondary-light: #334155;
+
+    /* Accent: Premium Terracotta & Burnt Orange */
+    --accent: #D95D39;
+    --accent-primary: #D95D39;      /* Terracotta - main accent */
+    --accent-secondary: #E66F0E;    /* Burnt Orange - secondary */
+    --accent-success: #0F766E;      /* Deep Spruce - success */
+    --accent-warning: #D97706;      /* Amber - warning */
+    --accent-danger: #BE123C;       /* Crimson - danger */
+    --accent-info: #0284C7;         /* Slate Cobalt - info */
 
     /* Text Colors */
-    --text-primary: #f4f4f5;
-    --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
-    --text-disabled: #52525b;
+    --text-primary: #1E293B;         /* Obsidian Heading & Body */
+    --text-secondary: #475569;       /* Slate 600 */
+    --text-muted: #64748B;           /* Slate 500 */
+    --text-disabled: #94A3B8;
 
     /* Borders */
-    --border-color: #27272a;
-    --border-subtle: #1f1f23;
-    --border-focus: #22d3ee;
+    --border-color: #E2E8F0;
+    --border-subtle: #EDE8E1;
+    --border-focus: #D95D39;
 
     /* Spacing */
     --space-xs: 4px;
@@ -43,14 +49,14 @@
     --space-2xl: 48px;
 
     /* Typography */
-    --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
     /* Shadows */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-    --shadow-glow: 0 0 20px rgba(34, 211, 238, 0.15);
+    --shadow-sm: 0 1px 3px rgba(30, 41, 59, 0.05);
+    --shadow-md: 0 4px 12px -2px rgba(30, 41, 59, 0.08);
+    --shadow-lg: 0 12px 28px -4px rgba(30, 41, 59, 0.10);
+    --shadow-glow: 0 4px 14px rgba(217, 93, 57, 0.25);
 
     /* Transitions */
     --transition-fast: 150ms ease;
