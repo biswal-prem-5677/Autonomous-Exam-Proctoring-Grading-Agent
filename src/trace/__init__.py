@@ -155,7 +155,7 @@ class IntegrityDecisionTrace:
             ],
             "corroboration": self.corroboration_result,
             "uncertainty": {
-                "confidence": round(self.confidence, 3),
+                "confidence": round(self.confidence, 3) if self.confidence is not None else None,
                 "signal_agreement": self.signal_agreement,
                 "total_signals": self.total_signals,
                 "reason": self.uncertainty_reason,

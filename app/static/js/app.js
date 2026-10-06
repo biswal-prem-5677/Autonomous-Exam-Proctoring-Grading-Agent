@@ -241,8 +241,32 @@ const App = {
         catch (e) { return { checks, can_proceed: false, error: e.message }; }
     },
 
-    startExamSession(studentId, examId) {
-        this.examSession = { studentId, examId, startTime: Date.now(), answers: {}, browserEvents: [] };
+    async startExamSession(studentId, examId) {
+        let serverSession = null;
+        try {
+            serverSession = await this.apiPost('/api/exam-sessions', {
+                student_id: studentId,
+                exam_id: examId,
+            });
+        } catch (e) {
+            console.warn('Server session creation failed, proceeding with local session:', e);
+        }
+
+        const sessionKey = (serverSession && serverSession.session_key)
+            ? serverSession.session_key
+            : `${studentId}:${examId}`;
+
+        this.examSession = {
+            studentId,
+            examId,
+            sessionId: serverSession?.session_id || 'local_session',
+            session_key: sessionKey,
+            startTime: Date.now(),
+            answers: {},
+            browserEvents: [],
+            serverData: serverSession,
+        };
+        return this.examSession;
     },
 
     submitAnswer(questionId, answer) { if (this.examSession) { this.examSession.answers[questionId] = answer; } },

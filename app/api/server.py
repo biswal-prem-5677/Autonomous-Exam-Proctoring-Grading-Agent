@@ -232,7 +232,7 @@ def list_exams():
 @app.route("/api/exams", methods=["POST"])
 def create_exam():
     data = request.get_json(force=True)
-    exam_id = data.get("exam_id", f"exam_{int(time.time())}")
+    exam_id = data.get("exam_id") or data.get("id") or f"exam_{int(time.time())}"
     exam = _exam_manager.create_exam(
         exam_id=exam_id,
         title=data.get("title", "Untitled Exam"),
@@ -1702,6 +1702,18 @@ def vision_analyze():
             result["events"].append({"type": "gaze_away", "confidence": min(yaw / 60, 1.0), "source": "vision"})
             result["risk_contribution"] += 0.15
     result["risk_contribution"] = min(result["risk_contribution"], 1.0)
+
+    # Record vision events to session evidence log if active
+    evidence_log = _evidence_logs.get(session_key)
+    if evidence_log and result.get("events"):
+        for evt in result["events"]:
+            evidence_log.add_from_risk_event(
+                event_type=evt.get("type", "unknown"),
+                confidence=evt.get("confidence", 0.8),
+                description=f"Vision detector: {evt.get('type')}",
+                signal_source="vision",
+            )
+
     return jsonify(result)
 
 
@@ -1761,10 +1773,41 @@ def behavioral_analyze():
     anomaly_score = round(min(
         keyboard_stats["deviation"] * 0.3 + mouse_stats["deviation"] * 0.3 +
         (1.0 if browser_stats["tab_switches"] > 3 else 0.0) * 0.4, 1.0), 4)
+
+    # Process signals through active ProctoringAgent & EvidenceLog if present
+    agent = _proctoring_agents.get(session_key)
+    agent_state = "NORMAL"
+    agent_risk = 0.0
+    if agent:
+        agent_signals = dict(signals)
+        agent_signals.update({
+            "typing_wpm": float(kb.get("events_per_minute", 60)) / 5.0,
+            "mouse_velocity": float(mouse.get("avg_speed", 0)),
+            "mouse_clicks": int(mouse.get("clicks", 0)),
+            "tab_switch": browser_stats.get("tab_switches", 0) > 0,
+            "fullscreen_exit": browser_stats.get("fullscreen_exits", 0) > 0,
+        })
+        try:
+            agent_result = agent.process_signals(agent_signals)
+            agent_state = agent_result.get("state", "NORMAL")
+            agent_risk = agent_result.get("risk_score", 0.0)
+            evidence_log = _evidence_logs.get(session_key)
+            if evidence_log:
+                for evt in agent_result.get("events_detected", []):
+                    evidence_log.add_from_risk_event(
+                        event_type=evt.get("type", "unknown"),
+                        confidence=evt.get("confidence", 0.8),
+                        description=f"Detected {evt.get('type', 'event')} from {evt.get('source', 'sensor')} signal",
+                        signal_source=evt.get("source", "sensor"),
+                    )
+        except Exception:
+            pass
+
     result = {
         "session_key": session_key, "features": feature_list, "feature_count": len(feature_list),
         "keyboard": keyboard_stats, "mouse": mouse_stats, "audio": audio_stats, "browser": browser_stats,
         "anomaly_score": anomaly_score, "anomaly_detected": anomaly_score > 0.5,
+        "agent_state": agent_state, "agent_risk": agent_risk,
     }
     return jsonify(result)
 

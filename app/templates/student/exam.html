@@ -184,6 +184,8 @@
     <script>
     // ─── State ───────────────────────────────────────────────────────────────
 
+    let examId = 'default';
+    let studentId = 'student';
     let examData = null;
     let questions = [];
     let currentQuestion = 0;
@@ -198,6 +200,9 @@
     // ─── Preflight ──────────────────────────────────────────────────────────
 
     async function runPreflight() {
+        const currentExamId = examId || App.examSession?.examId || 'default';
+        const currentStudentId = studentId || App.examSession?.studentId || 'student';
+
         const checks = {
             camera_available: false,
             microphone_available: false,
@@ -227,8 +232,8 @@
                 camera_available: checks.camera_available,
                 online: checks.online,
                 browser_capabilities: checks.browser_capabilities,
-                exam_id: examId,
-                student_id: studentId,
+                exam_id: currentExamId,
+                student_id: currentStudentId,
             });
 
             const container = document.getElementById('preflight-checks');
@@ -259,8 +264,8 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
         const urlParams = new URLSearchParams(window.location.search);
-        const examId = urlParams.get('exam_id') || urlParams.get('examId') || 'default';
-        const studentId = App.currentUser?.username || 'student';
+        examId = urlParams.get('exam_id') || urlParams.get('examId') || 'default';
+        studentId = App.currentUser?.username || 'student';
 
         // Load exam details
         try {
@@ -278,13 +283,31 @@
             document.getElementById('exam-title').textContent = 'Exam (offline mode)';
         }
 
-        App.startExamSession(studentId, examId);
+        // Initialize local session state for preflight
+        App.examSession = {
+            studentId,
+            examId,
+            session_key: `${studentId}:${examId}`,
+            startTime: Date.now(),
+            answers: {},
+            browserEvents: []
+        };
         await runPreflight();
     });
 
     document.getElementById('start-exam-btn')?.addEventListener('click', startExam);
 
     async function startExam() {
+        // Create the real server-side session first
+        try {
+            const session = await App.startExamSession(studentId, examId);
+            if (session?.serverData?.questions && session.serverData.questions.length > 0) {
+                questions = session.serverData.questions;
+            }
+        } catch (e) {
+            console.warn('Server session creation failed, proceeding with local session:', e);
+        }
+
         document.getElementById('pre-exam-screen').style.display = 'none';
         document.getElementById('exam-screen').style.display = 'block';
 
@@ -295,7 +318,9 @@
         }
 
         examStartTime = Date.now();
-        App.examSession.startTime = examStartTime;
+        if (App.examSession) {
+            App.examSession.startTime = examStartTime;
+        }
 
         // Try fullscreen
         try {
@@ -305,10 +330,10 @@
         // Load questions if not loaded
         if (questions.length === 0) {
             try {
-                const urlParams = new URLSearchParams(window.location.search);
-                const examId = urlParams.get('exam_id') || urlParams.get('examId') || 'default';
                 const data = await App.apiGet(`/api/exams/${examId}`);
-                if (data.exam?.questions) {
+                if (data.questions && data.questions.length > 0) {
+                    questions = data.questions;
+                } else if (data.exam?.questions) {
                     questions = data.exam.questions;
                 }
             } catch (e) { console.error('Failed to load questions:', e); }
@@ -428,12 +453,27 @@
         if (proctoringInterval) clearInterval(proctoringInterval);
 
         try {
-            // Submit answers
+            const currentStudentId = App.examSession?.studentId || studentId;
+            const currentExamId = App.examSession?.examId || examId;
+            const sessionKey = App.examSession?.session_key || `${currentStudentId}:${currentExamId}`;
+
+            // Submit answers to grading engine & database
             await App.apiPost('/api/grading/submit', {
-                student_id: App.examSession.studentId,
-                exam_id: App.examSession.examId,
+                student_id: currentStudentId,
+                exam_id: currentExamId,
+                session_key: sessionKey,
+                session_id: App.examSession?.sessionId,
                 answers: answers,
             });
+
+            // Mark session completed on server controller
+            try {
+                await App.apiPost(`/api/exam-sessions/${currentStudentId}/${currentExamId}/submit`, {
+                    answers: answers,
+                });
+            } catch (e) {
+                console.warn('Session end notification:', e.message);
+            }
 
             document.getElementById('exam-screen').innerHTML = `
                 <div class="login-page">
@@ -466,6 +506,9 @@
 
     async function runProctoringCheck() {
         const elapsed = App.getExamElapsed();
+        const currentStudentId = App.examSession?.studentId || studentId;
+        const currentExamId = App.examSession?.examId || examId;
+        const sessionKey = App.examSession?.session_key || `${currentStudentId}:${currentExamId}`;
 
         // Gather REAL browser + sensor stats (no placeholders)
         const browserStats = App.getBrowserStats();
@@ -489,7 +532,7 @@
 
                 // Send ONLY the image - backend runs real FaceTracker inference
                 const visionResult = await App.apiPost('/api/vision/analyze', {
-                    session_key: App.examSession?.session_key || 'default',
+                    session_key: sessionKey,
                     image: imageData,
                 });
 
@@ -527,7 +570,7 @@
         // Send behavioral analysis
         try {
             const analysis = await App.apiPost('/api/behavioral/analyze', {
-                session_key: App.examSession?.session_key || 'default',
+                session_key: sessionKey,
                 face_present: facePresent,
                 face_count: faceCount,
                 face_confidence: faceConfidence,
@@ -537,6 +580,10 @@
                 browser: browserStats,
                 session_elapsed: elapsed,
             });
+
+            if (analysis && analysis.agent_risk !== undefined) {
+                updateRiskDisplay(analysis.agent_risk);
+            }
 
             // Log browser events
             if (browserStats.tab_switches > 0) {
@@ -571,7 +618,9 @@
 
     async function loadAgentTrace() {
         try {
-            const sessionKey = App.examSession?.session_key || '';
+            const currentStudentId = App.examSession?.studentId || studentId;
+            const currentExamId = App.examSession?.examId || examId;
+            const sessionKey = App.examSession?.session_key || `${currentStudentId}:${currentExamId}`;
             const skParam = sessionKey ? ('?session_key=' + encodeURIComponent(sessionKey)) : '';
             const resp = await App.apiGet('/api/agent/status' + skParam);
             const panel = document.getElementById('risk-analysis-panel');
