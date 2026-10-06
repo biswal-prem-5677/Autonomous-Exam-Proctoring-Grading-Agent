@@ -5,7 +5,6 @@ Usage:
     python -m app.backend --port 5000 --host 0.0.0.0
 """
 import argparse
-import sys
 from app.api.server import app
 
 

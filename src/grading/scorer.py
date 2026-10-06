@@ -1,6 +1,6 @@
 """Unified grading orchestrator — routes questions to appropriate graders."""
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from src.models.models import Question, QuestionType
 from src.grading.mcq import MCQGrader
 from src.grading.numerical import NumericalGrader

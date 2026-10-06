@@ -2,7 +2,7 @@
 
 import time
 import threading
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Any, Callable
 from datetime import datetime, timedelta
 from src.models.models import ExamSession, AgentState, ProctoringEvent
 

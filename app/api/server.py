@@ -5,47 +5,36 @@ No external APIs — all computation is local.
 """
 
 import sys
-import os
-import json
 import time
 import uuid
-import threading
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from flask import Flask, jsonify, request, render_template, send_from_directory
+from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 
 # ── Backend imports ──────────────────────────────────────────────────────────
-from src.models.models import (
-    Question, QuestionType, Exam, ExamSession, AgentState, ProctoringEvent,
-)
-from src.exam.exam import ExamManager, ExamController
-from src.exam.session import ExamSessionManager
-from src.exam.questions import QuestionBank
+from src.models.models import Question, QuestionType
+from src.exam.exam import ExamManager
 from src.grading.scorer import GradingOrchestrator
-from src.grading.long_answer import LongAnswerGrader
-from src.agent.controller import ProctoringAgent, AgentPhase
+from src.agent.controller import ProctoringAgent
 from src.agent.risk import RiskEngine
-from src.agent.memory import EvidenceMemory
-from src.agent.state import AgentStateMachine
 from src.features.behavioral import BehavioralFeatureExtractor
-from src.features.temporal import TemporalFeatureAggregator
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
-from src.ml.calibration import ModelCalibrator, ModelEvaluator
+from src.ml.calibration import ModelEvaluator
 from src.ml.training_data import TrainingDataGenerator
 from src.prediction.performance import PerformancePredictor
 from src.prediction.knowledge import KnowledgeTracer
 from src.prediction.difficulty import DifficultyEstimator
 from src.reports.student_report import StudentReportGenerator
 from src.reports.examiner_report import ExaminerReportGenerator
-from src.reports.evidence import EvidenceLog, EvidenceSeverity
+from src.reports.evidence import EvidenceLog
 from src.database.db import Database, DB_PATH
 from src.utils.config import load_config
 from src.trace.replay import DecisionReplayEngine
@@ -54,7 +43,7 @@ from src.grading.mathematical import MathematicalGrader
 from src.grading.programming import ProgrammingGrader
 from src.grading.plagiarism import PlagiarismDetector
 from src.grading.consensus import GraderDisagreementEngine
-from src.ml.adversarial import RedTeamHarness, AdversarialSimulator
+from src.ml.adversarial import RedTeamHarness
 from src.baseline import StudentBaseline
 
 # ── App setup ────────────────────────────────────────────────────────────────
@@ -945,11 +934,10 @@ def examiner_overview(exam_id):
         if progress >= 100:
             # Has completed — compute score from grading
             graded = _grade_session_internal(student_id, exam_id, exam)
-            score_pct = float(graded.get("percentage", 0.0))
+            pct_val = graded.get("percentage", 0.0)
+            score_pct = float(pct_val) if isinstance(pct_val, (int, float, str)) else 0.0
             total_score += score_pct
             scored_count += 1
-        else:
-            progress_val = round(progress, 1)
 
         students.append({
             "student_id": student_id,
@@ -2469,8 +2457,8 @@ def training_train():
         }
 
         # ── Step 5: Anomaly detector on normal training samples ───────────────
+        detector: Optional[AnomalyDetector] = None
         try:
-            from src.ml.anomaly import AnomalyDetector
             normal_train = X_train[y_train == 0]
             if len(normal_train) > 10:
                 detector = AnomalyDetector(method="zscore", threshold=2.5)
@@ -2509,10 +2497,9 @@ def training_train():
         # ── Step 6: Persist models & update live agents ───────────────────────
         try:
             import pickle
-            from pathlib import Path
             global _loaded_logistic_model, _loaded_anomaly_model
             _loaded_logistic_model = model
-            _loaded_anomaly_model = detector if 'detector' in locals() else None
+            _loaded_anomaly_model = detector
             m_dir = Path(__file__).parent.parent.parent / "models"
             m_dir.mkdir(parents=True, exist_ok=True)
             with open(m_dir / "logistic_model.pkl", "wb") as f:

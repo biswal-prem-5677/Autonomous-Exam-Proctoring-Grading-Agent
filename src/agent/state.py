@@ -1,6 +1,5 @@
 """Agent state machine — manages state transitions with validation."""
 
-from typing import Optional
 from src.models.models import AgentState
 
 

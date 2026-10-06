@@ -7,10 +7,8 @@ import hmac
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 import sqlite3
-
-from src.models.auth_models import User, UserRole, Organization, OrganizationType
 
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "auth.db"
 

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List, Any
-from src.models.models import Exam, ExamSession, AgentState, ProctoringEvent, Question
+from src.models.models import Exam, ExamSession, AgentState, ProctoringEvent
 from src.exam.session import ExamSessionManager
 from src.exam.questions import QuestionBank
 from src.agent.risk import RiskEngine

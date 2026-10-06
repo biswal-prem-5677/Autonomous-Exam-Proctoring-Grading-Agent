@@ -5,9 +5,6 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
-from src.models.models import (
-    QuestionType, AgentState, Question, ProctoringEvent, Exam, ExamSession,
-)
 
 
 # ── Enums ──────────────────────────────────────────────────────────────────────
