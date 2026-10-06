@@ -108,12 +108,14 @@ def student_exam_old():
 
 
 @app.route("/exam")
+@app.route("/student/exam")
 def student_exam_new():
     """New student exam interface with webcam."""
     return render_template("student/exam.html")
 
 
 @app.route("/examiner")
+@app.route("/examiner/dashboard")
 def examiner_dashboard():
     """Examiner monitoring dashboard."""
     return render_template("examiner_dashboard.html")
