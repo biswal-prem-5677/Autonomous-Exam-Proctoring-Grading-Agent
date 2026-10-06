@@ -242,16 +242,16 @@ r = post(f"/api/proctor/process/v_stud/{exam_id or 'exam_001'}", {
     "session_key": session_key or "default",
     "signals": {"face_present": True, "tab_switch": False},
 })
-check("Proctor process", r.status_code in (200, 201, 404, 500), f"status={r.status_code}")
+check("Proctor process", r.status_code in (200, 201), f"status={r.status_code}")
 
 r = get(f"/api/proctor/status/v_stud/{exam_id or 'exam_001'}")
-check("Proctor status", r.status_code in (200, 404), f"status={r.status_code}")
+check("Proctor status", r.status_code == 200, f"status={r.status_code}")
 
 r = get(f"/api/proctor/history/v_stud/{exam_id or 'exam_001'}")
-check("Proctor history", r.status_code in (200, 404), f"status={r.status_code}")
+check("Proctor history", r.status_code == 200, f"status={r.status_code}")
 
 r = get(f"/api/proctor/evidence/v_stud/{exam_id or 'exam_001'}")
-check("Proctor evidence", r.status_code in (200, 404), f"status={r.status_code}")
+check("Proctor evidence", r.status_code == 200, f"status={r.status_code}")
 
 # ── 10. Grading API ───────────────────────────────────────────────────────────
 print("\n── 10. Grading API ──")
@@ -273,7 +273,7 @@ r = post("/api/grade", {
     ],
     "reference": {"q1": "4", "q2": "3.14"},
 })
-check("Grade endpoint", r.status_code in (200, 201, 400), f"status={r.status_code}")
+check("Grade endpoint", r.status_code in (200, 201), f"status={r.status_code}")
 
 # ── 11. Reports ───────────────────────────────────────────────────────────────
 print("\n── 11. Reports ──")
@@ -281,24 +281,24 @@ print("\n── 11. Reports ──")
 r = post("/api/reports/student", {
     "student_id": "v_stud", "exam_id": exam_id or "exam_001"
 })
-check("Student report", r.status_code in (200, 404, 500), f"status={r.status_code}")
+check("Student report", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/reports/examiner", {
     "exam_id": exam_id or "exam_001"
 })
-check("Examiner report", r.status_code in (200, 404, 500), f"status={r.status_code}")
+check("Examiner report", r.status_code == 200, f"status={r.status_code}")
 
 # ── 12. Training API ──────────────────────────────────────────────────────────
 print("\n── 12. Training API ──")
 
 r = post("/api/train/generate-data", {"n_normal": 10, "n_suspicious": 10})
-check("Train generate-data", r.status_code in (200, 500), f"status={r.status_code}")
+check("Train generate-data", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/train/models", {"n_normal": 10, "n_suspicious": 10})
-check("Train models", r.status_code in (200, 500), f"status={r.status_code}")
+check("Train models", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/train/evaluate", {})
-check("Train evaluate", r.status_code in (200, 400, 500), f"status={r.status_code}")
+check("Train evaluate", r.status_code in (200, 400), f"status={r.status_code}")
 
 # ── 13. Prediction API ───────────────────────────────────────────────────────
 print("\n── 13. Prediction API ──")
@@ -307,21 +307,21 @@ r = post("/api/predict/performance", {
     "student_id": "v_stud",
     "features": [0.5, 0.3, 0.8, 0.2]
 })
-check("Predict performance", r.status_code in (200, 400, 500), f"status={r.status_code}")
+check("Predict performance", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/predict/difficulty", {
     "responses": [1, 0, 1, 1, 0, 1, 1, 1, 0, 1]
 })
-check("Predict difficulty", r.status_code in (200, 400, 500), f"status={r.status_code}")
+check("Predict difficulty", r.status_code == 200, f"status={r.status_code}")
 
 # ── 14. Demo API ──────────────────────────────────────────────────────────────
 print("\n── 14. Demo API ──")
 
 r = post("/api/demo/setup", {})
-check("Demo setup", r.status_code in (200, 400, 500), f"status={r.status_code}")
+check("Demo setup", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/demo/generate-answers", {"student_id": "v_stud"})
-check("Demo generate-answers", r.status_code in (200, 400, 500), f"status={r.status_code}")
+check("Demo generate-answers", r.status_code == 200, f"status={r.status_code}")
 
 # ── 15. Dashboard & Config ────────────────────────────────────────────────────
 print("\n── 15. Dashboard & Config ──")
@@ -339,7 +339,7 @@ if r.status_code == 200:
 print("\n── 16. Evidence ──")
 
 r = get(f"/api/evidence/{session_key or 'default'}", headers={"Authorization": f"Bearer {exam_token}"} if exam_token else None)
-check("Evidence endpoint", r.status_code in (200, 401, 404, 500), f"status={r.status_code}")
+check("Evidence endpoint", r.status_code == 200, f"status={r.status_code}")
 
 # ── 17. Organization API ──────────────────────────────────────────────────────
 print("\n── 17. Organizations ──")

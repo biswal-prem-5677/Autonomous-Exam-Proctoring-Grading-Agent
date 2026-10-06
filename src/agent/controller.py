@@ -271,7 +271,7 @@ class ProctoringAgent:
         return result
 
     def get_status(self) -> Dict[str, Any]:
-        """Get current agent status."""
+        """Get current agent status including the last explainability trace."""
         return {
             "session_id": self.session_id,
             "state": self._state.value,
@@ -280,6 +280,7 @@ class ProctoringAgent:
             "evidence_events": len(self.evidence_memory._entries),
             "current_risk": round(self.evidence_memory.get_current_risk(), 4),
             "history_length": len(self._history),
+            "last_trace": self._last_trace,
         }
 
     def get_last_trace(self) -> Optional[Dict[str, Any]]:

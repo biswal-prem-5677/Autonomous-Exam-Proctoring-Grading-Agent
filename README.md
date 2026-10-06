@@ -272,7 +272,7 @@ Exam Behavior ──→ Risk ──→ Evidence ──→ Grade ──→ Perfor
 | **Vision** | OpenCV, MediaPipe | Local face detection (no API) |
 | **NLP** | TF-IDF (self) | Explainable text scoring |
 | **ML Models** | scikit-learn | Model comparison baseline |
-| **UI** | Streamlit | Rapid prototyping, web interface |
+| **UI** | Flask + HTML/CSS/JS | Web app, no framework dependencies |
 | **Storage** | SQLite | Lightweight, local-first |
 | **Viz** | Matplotlib, Plotly | Charts and reports |
 | **Tests** | pytest | Comprehensive test coverage |
@@ -508,11 +508,12 @@ python main.py demo
 # Run tests
 python main.py test
 
-# Launch student exam UI
-streamlit run app/student/exam.py
+# Launch the web application (Flask — student + examiner UI)
+python main.py
+# or
+python -m app.api.server
 
-# Launch examiner dashboard
-streamlit run app/examiner/dashboard.py
+# Open in browser: http://localhost:5000
 ```
 
 ### Configuration

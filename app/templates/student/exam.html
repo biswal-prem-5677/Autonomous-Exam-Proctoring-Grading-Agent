@@ -318,6 +318,9 @@
         buildQuestionNav();
         renderQuestion();
         startTimer();
+        // Initialize real sensor tracking BEFORE first proctoring check
+        App.initKeystrokeTracking();
+        App.initMouseTracking();
         startProctoring();
     }
 
@@ -464,10 +467,10 @@
     async function runProctoringCheck() {
         const elapsed = App.getExamElapsed();
 
-        // Gather browser stats
+        // Gather REAL browser + sensor stats (no placeholders)
         const browserStats = App.getBrowserStats();
-        const keyboardStats = { events_per_minute: 0, mean_key_hold: 0, mean_latency: 0, deviation: 0.0 };
-        const mouseStats = { avg_speed: 0, total_distance: 0, click_rate: 0, deviation: 0.0 };
+        const keyboardStats = App.getKeyboardStats();
+        const mouseStats    = App.getMouseStats();
 
         // Capture webcam frame for vision analysis
         let facePresent = true, faceCount = 1, faceConfidence = 0.9, headPose = { yaw: 0, pitch: 0, roll: 0 };
@@ -562,13 +565,17 @@
 
     async function loadAgentTrace() {
         try {
-            const resp = await App.apiGet('/api/agent/status');
+            const sessionKey = App.examSession?.session_key || '';
+            const skParam = sessionKey ? ('?session_key=' + encodeURIComponent(sessionKey)) : '';
+            const resp = await App.apiGet('/api/agent/status' + skParam);
             const panel = document.getElementById('risk-analysis-panel');
             if (!panel) return;
 
             const risk = resp.current_risk || 0;
             const state = resp.state || 'NORMAL';
             const iteration = resp.iteration || 0;
+            // Real trace from IntegrityDecisionTrace (may be null if no events yet)
+            const trace = resp.last_trace || null;
 
             panel.style.display = 'block';
 
@@ -595,34 +602,59 @@
             };
             document.getElementById('trace-uncertainty').textContent = uncertaintyMap[state] || 'MEDIUM';
 
-            // Load history for corroboration + contributions
-            const historyResp = await App.apiGet('/api/agent/history');
-            const history = historyResp.history || [];
-            if (history.length > 0) {
-                const last = history[history.length - 1];
-                const prevRisk = history.length > 1 ? Math.round(history[history.length - 2].risk_score * 100) : 0;
-                document.getElementById('trace-prev-risk').textContent = prevRisk;
-
-                // Confidence from corroboration
-                const events = last.events_detected || [];
-                const modalities = new Set(events.map(e => {
-                    const t = (e.type || '').toLowerCase();
-                    if (t.includes('face') || t.includes('gaze') || t.includes('head')) return 'vision';
-                    if (t.includes('audio') || t.includes('speech') || t.includes('sound')) return 'audio';
-                    if (t.includes('key') || t.includes('typing')) return 'keyboard';
-                    if (t.includes('mouse') || t.includes('click')) return 'mouse';
-                    if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen') || t.includes('window') || t.includes('focus')) return 'browser';
-                    return 'other';
-                }));
-                const modalityCount = modalities.size || 1;
-                const corroborationScores = { 1: 45, 2: 62, 3: 78, 4: 87, 5: 93, 6: 97 };
-                const confPct = corroborationScores[Math.min(modalityCount, 6)] || 45;
-                document.getElementById('trace-confidence').innerHTML = confPct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span>';
+            // ── Use real IntegrityDecisionTrace when available ────────────
+            if (trace) {
+                // Confidence from ML trace (uncertainty.confidence is 0–1)
+                const confPct = Math.round((trace.uncertainty?.confidence || 0) * 100);
+                document.getElementById('trace-confidence').innerHTML =
+                    confPct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span>';
+                // Corroboration modality count from trace
+                const corrobData = trace.corroboration || {};
+                const modalityCount = corrobData.modality_count || (trace.contributions || []).length || 1;
                 document.getElementById('trace-corroboration').textContent = modalityCount;
+                // Decision reason from trace
+                const traceDecision = trace.decision_reason || trace.decision || state;
+                document.getElementById('trace-decision').textContent = String(traceDecision).replace(/_/g, ' ');
+                // Previous risk from trace
+                const prevRiskPct = Math.round((trace.risk?.previous || 0) * 100);
+                document.getElementById('trace-prev-risk').textContent = prevRiskPct;
+            } else {
+                // Fallback: load history for corroboration + contributions
+                const historyResp = await App.apiGet('/api/agent/history' + skParam);
+                const history = historyResp.history || [];
+                if (history.length > 0) {
+                    const last = history[history.length - 1];
+                    const prevRisk = history.length > 1 ? Math.round(history[history.length - 2].risk_score * 100) : 0;
+                    document.getElementById('trace-prev-risk').textContent = prevRisk;
 
-                // Render contributions
-                renderContributions(events);
-                renderCorroboration(events);
+                    // UI_HEURISTIC fallback: infer modality from event-name strings
+                    // (Only used when real trace is unavailable)
+                    const events = last.events_detected || [];
+                    const modalities = new Set(events.map(e => {
+                        const t = (e.type || '').toLowerCase();
+                        if (t.includes('face') || t.includes('gaze') || t.includes('head')) return 'vision';
+                        if (t.includes('audio') || t.includes('speech') || t.includes('sound')) return 'audio';
+                        if (t.includes('key') || t.includes('typing')) return 'keyboard';
+                        if (t.includes('mouse') || t.includes('click')) return 'mouse';
+                        if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen')) return 'browser';
+                        return 'other';
+                    }));
+                    const modalityCount = modalities.size || 1;
+                    const corroborationScores = { 1: 45, 2: 62, 3: 78, 4: 87, 5: 93, 6: 97 };
+                    const confPct = corroborationScores[Math.min(modalityCount, 6)] || 45;
+                    document.getElementById('trace-confidence').innerHTML =
+                        confPct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span>';
+                    document.getElementById('trace-corroboration').textContent = modalityCount;
+                    renderContributions(events);
+                    renderCorroboration(events);
+                }
+            }
+
+            // Render contributions from real trace if available
+            if (trace && trace.contributions && trace.contributions.length > 0) {
+                const traceEvents = trace.contributions.map(c => ({ type: c.event_type, confidence: c.confidence }));
+                renderContributions(traceEvents);
+                renderCorroboration(traceEvents);
             }
         } catch (e) {
             // Agent not running, hide panel

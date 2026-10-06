@@ -95,6 +95,8 @@
                             <option value="numerical">Numerical</option>
                             <option value="short_answer">Short Answer</option>
                             <option value="long_answer">Long Answer</option>
+                            <option value="mathematical">Mathematical (Formula)</option>
+                            <option value="programming">Programming (Code)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -121,6 +123,34 @@
                         <label class="form-label">Keywords (comma-separated)</label>
                         <input type="text" id="q-keywords" class="form-input" placeholder="key1, key2, key3">
                     </div>
+                    <!-- Mathematical fields -->
+                    <div class="form-group" id="q-formula-group" style="display:none;">
+                        <label class="form-label">Expected Formula / Expression</label>
+                        <input type="text" id="q-formula" class="form-input" placeholder="e.g. x^2 + 2x + 1">
+                    </div>
+                    <div class="form-group" id="q-variables-group" style="display:none;">
+                        <label class="form-label">Variables / Symbols (comma-separated)</label>
+                        <input type="text" id="q-variables" class="form-input" placeholder="x, y, z">
+                    </div>
+                    <!-- Programming fields -->
+                    <div class="form-group" id="q-language-group" style="display:none;">
+                        <label class="form-label">Language</label>
+                        <select id="q-language" class="form-select">
+                            <option value="python">Python</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="java">Java</option>
+                            <option value="cpp">C++</option>
+                            <option value="c">C</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="q-starter-group" style="display:none;">
+                        <label class="form-label">Starter Code</label>
+                        <textarea id="q-starter" class="form-textarea" placeholder="def solution(...):\n    pass" style="min-height:90px;font-family:monospace;"></textarea>
+                    </div>
+                    <div class="form-group" id="q-testcases-group" style="display:none;">
+                        <label class="form-label">Test Cases (JSON array, e.g. [{"input": "3", "expected": "9"}])</label>
+                        <textarea id="q-testcases" class="form-textarea" placeholder='[{"input": "5", "expected": "25"}]' style="min-height:80px;font-family:monospace;"></textarea>
+                    </div>
                     <button class="btn btn-primary btn-block" onclick="addQuestion()">&#x2795; Add Question</button>
                 </div>
             </div>
@@ -143,9 +173,23 @@
 
     function updateQuestionForm() {
         const type = document.getElementById('q-type').value;
-        document.getElementById('q-options-group').style.display = type === 'mcq' ? 'block' : 'none';
-        document.getElementById('q-tolerance-group').style.display = type === 'numerical' ? 'block' : 'none';
-        document.getElementById('q-keywords-group').style.display = ['short_answer', 'long_answer'].includes(type) ? 'block' : 'none';
+        const isMCQ      = type === 'mcq';
+        const isNum      = type === 'numerical';
+        const isText     = ['short_answer', 'long_answer'].includes(type);
+        const isMath     = type === 'mathematical';
+        const isProg     = type === 'programming';
+
+        document.getElementById('q-options-group').style.display   = isMCQ  ? 'block' : 'none';
+        document.getElementById('q-tolerance-group').style.display  = isNum  ? 'block' : 'none';
+        document.getElementById('q-keywords-group').style.display   = isText ? 'block' : 'none';
+        document.getElementById('q-correct-group').style.display    = (isMCQ || isNum || isMath) ? 'block' : 'none';
+        // Mathematical
+        document.getElementById('q-formula-group').style.display    = isMath ? 'block' : 'none';
+        document.getElementById('q-variables-group').style.display  = isMath ? 'block' : 'none';
+        // Programming
+        document.getElementById('q-language-group').style.display   = isProg ? 'block' : 'none';
+        document.getElementById('q-starter-group').style.display    = isProg ? 'block' : 'none';
+        document.getElementById('q-testcases-group').style.display  = isProg ? 'block' : 'none';
     }
 
     function showAlert(msg, type) {
@@ -182,14 +226,33 @@
         const keywordsRaw = document.getElementById('q-keywords').value.trim();
         const keywords = keywordsRaw ? keywordsRaw.split(',').map(k => k.trim()).filter(Boolean) : [];
 
+        // Parse test cases JSON for programming questions
+        let testCases = undefined;
+        if (type === 'programming') {
+            try {
+                const raw = document.getElementById('q-testcases').value.trim();
+                testCases = raw ? JSON.parse(raw) : [];
+            } catch {
+                showAlert('Test cases must be valid JSON', 'error');
+                return;
+            }
+        }
+
         const question = {
             type,
             text,
             marks: parseFloat(document.getElementById('q-marks').value) || 1,
-            correct_answer: correct || undefined,
-            tolerance: parseFloat(document.getElementById('q-tolerance').value) || 0.01,
-            keywords: keywords.length ? keywords : undefined,
-            options: type === 'mcq' ? document.getElementById('q-options').value.split('\n').filter(Boolean) : undefined,
+            correct_answer:  correct || undefined,
+            tolerance:       parseFloat(document.getElementById('q-tolerance').value) || 0.01,
+            keywords:        keywords.length ? keywords : undefined,
+            options:         type === 'mcq' ? document.getElementById('q-options').value.split('\n').filter(Boolean) : undefined,
+            // Mathematical extras
+            formula_hint:    type === 'mathematical' ? (document.getElementById('q-formula').value.trim() || undefined) : undefined,
+            variables:       type === 'mathematical' ? (document.getElementById('q-variables').value.trim() || undefined) : undefined,
+            // Programming extras
+            language:        type === 'programming' ? document.getElementById('q-language').value : undefined,
+            starter_code:    type === 'programming' ? (document.getElementById('q-starter').value || undefined) : undefined,
+            test_cases:      testCases,
         };
 
         if (!createdExamId) {
@@ -206,6 +269,10 @@
             document.getElementById('q-correct').value = '';
             document.getElementById('q-options').value = '';
             document.getElementById('q-keywords').value = '';
+            document.getElementById('q-formula').value = '';
+            document.getElementById('q-variables').value = '';
+            document.getElementById('q-starter').value = '';
+            document.getElementById('q-testcases').value = '';
             showAlert('Question added!', 'success');
         } catch (e) {
             showAlert('Failed: ' + e.message, 'error');
@@ -218,13 +285,17 @@
         document.getElementById('total-marks').textContent = questions.reduce((s, q) => s + (q.marks || 0), 0);
 
         const container = document.getElementById('questions-list');
+        const typeColors = {
+            mcq: 'info', numerical: 'success', short_answer: 'warning',
+            long_answer: 'danger', mathematical: 'primary', programming: 'neutral'
+        };
         container.innerHTML = questions.map((q, i) => {
-            const typeColors = { mcq: 'info', numerical: 'success', short_answer: 'warning', long_answer: 'danger' };
+            const label = q.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             return `<div style="display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
-                <span class="status-badge ${typeColors[q.type] || 'neutral'}">${q.type}</span>
+                <span class="status-badge ${typeColors[q.type] || 'neutral'}">${label}</span>
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(q.text)}</div>
-                    <div style="font-size:12px;color:var(--text-muted);">${q.marks} marks</div>
+                    <div style="font-size:12px;color:var(--text-muted);">${q.marks} marks${q.language ? ' · ' + q.language : ''}</div>
                 </div>
                 <span style="font-size:13px;color:var(--text-muted);">#${i + 1}</span>
             </div>`;
@@ -238,8 +309,6 @@
     }
 
     updateQuestionForm();
-</script>
-<script src="/static/js/app.js"></script>
-<script>
+    </script>
 </body>
 </html>
