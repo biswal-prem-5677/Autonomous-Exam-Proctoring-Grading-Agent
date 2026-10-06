@@ -258,15 +258,62 @@ class RiskEngine:
         return 0.0
 
     def _build_feature_vector(self, event_counts: dict,
-                              signal_summary: dict) -> Optional[np.ndarray]:
-        """Build feature vector for ML model."""
+                              signal_summary: dict,
+                              expected_dim: Optional[int] = None) -> Optional[np.ndarray]:
+        """Build feature vector for ML model matching trained feature dimensions."""
+        if expected_dim is None and self._logistic_model is not None and hasattr(self._logistic_model, "weights") and self._logistic_model.weights is not None:
+            expected_dim = len(self._logistic_model.weights)
+        if expected_dim is None:
+            expected_dim = 22
+
+        if expected_dim == 22:
+            # Full 22-dimensional feature vector matching TrainingDataGenerator
+            face_absent_cnt = event_counts.get("face_absent", 0)
+            multi_face_cnt = event_counts.get("multiple_faces", 0)
+            speech_cnt = event_counts.get("speech_detected", 0)
+            loud_cnt = event_counts.get("loud_audio", 0)
+
+            face_present = 0.0 if face_absent_cnt > 0 else 1.0
+            face_conf = 0.1 if face_absent_cnt > 0 else 0.95
+            face_cnt = 2.0 if multi_face_cnt > 0 else (0.0 if face_absent_cnt > 0 else 1.0)
+            absence_ratio = min(1.0, face_absent_cnt * 0.2)
+            head_yaw = 35.0 if event_counts.get("head_turned", 0) > 0 else 0.0
+            head_pitch = 25.0 if event_counts.get("gaze_away", 0) > 0 else 0.0
+            head_roll = 0.0
+            audio_rms = 0.7 if loud_cnt > 0 else (0.4 if speech_cnt > 0 else 0.05)
+            audio_db = float(signal_summary.get("audio", 0.0))
+            audio_zcr = 0.3 if speech_cnt > 0 else 0.05
+            audio_thresh = 1.0 if (loud_cnt > 0 or speech_cnt > 0) else 0.0
+            spectral_centroid = 0.5
+            kb_idle = 1.0 if event_counts.get("idle_keyboard", 0) > 0 else 0.0
+            keystroke_rate = 2.5 if event_counts.get("rapid_typing", 0) > 0 else 1.0
+            key_hold = 0.12
+            key_lat = 0.18
+            mouse_spd = 2.5 if event_counts.get("rapid_movement", 0) > 0 else 0.6
+            mouse_dist = 1.0
+            click_rate = 0.4
+            mouse_idle = 1.0 if event_counts.get("idle_mouse", 0) > 0 else 0.0
+            multi_events = float(multi_face_cnt)
+            progress = min(1.0, float(signal_summary.get("temporal", 0.1)))
+
+            features = [
+                face_present, face_conf, face_cnt, absence_ratio,
+                head_yaw, head_pitch, head_roll,
+                audio_rms, audio_db, audio_zcr, audio_thresh, spectral_centroid,
+                kb_idle, keystroke_rate, key_hold, key_lat,
+                mouse_spd, mouse_dist, click_rate, mouse_idle,
+                multi_events, progress
+            ]
+            return np.array(features, dtype=float)
+
+        # Fallback 10-feature vector if model specifically expects 10 features
         features = []
         for signal in ['vision', 'audio', 'keyboard', 'mouse', 'temporal']:
-            features.append(signal_summary.get(signal, 0))
+            features.append(signal_summary.get(signal, 0.0))
         for event in ['face_absent', 'multiple_faces', 'copy_paste',
                       'speech_detected', 'fullscreen_exit']:
-            features.append(event_counts.get(event, 0))
-        return np.array(features) if features else None
+            features.append(event_counts.get(event, 0.0))
+        return np.array(features, dtype=float)
 
     def compute_risk_decay(self, previous_risk: float, new_evidence: float) -> float:
         """Apply risk decay: R_t = alpha * R_{t-1} + (1-alpha) * E_t"""

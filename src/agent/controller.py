@@ -108,14 +108,18 @@ class ProctoringAgent:
         self._last_trace: Optional[Dict[str, Any]] = None
 
     def set_models(self, logistic: Optional[LogisticRegressionScratch] = None,
-                   anomaly: Optional[AnomalyDetector] = None) -> None:
+                   anomaly: Optional[AnomalyDetector] = None,
+                   logistic_model: Optional[LogisticRegressionScratch] = None,
+                   anomaly_model: Optional[AnomalyDetector] = None) -> None:
         """Attach trained ML models."""
-        if logistic:
-            self._logistic_model = logistic
-            self.risk_engine.set_logistic_model(logistic)
-        if anomaly:
-            self._anomaly_model = anomaly
-            self.risk_engine.set_anomaly_model(anomaly)
+        log_m = logistic if logistic is not None else logistic_model
+        ano_m = anomaly if anomaly is not None else anomaly_model
+        if log_m is not None:
+            self._logistic_model = log_m
+            self.risk_engine.set_logistic_model(log_m)
+        if ano_m is not None:
+            self._anomaly_model = ano_m
+            self.risk_engine.set_anomaly_model(ano_m)
 
     def set_callbacks(self, on_state_change: Optional[Callable] = None,
                       on_alert: Optional[Callable] = None) -> None:

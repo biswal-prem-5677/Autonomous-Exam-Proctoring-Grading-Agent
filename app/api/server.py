@@ -73,6 +73,40 @@ _knowledge_tracers: Dict[str, KnowledgeTracer] = {}
 _performance_predictors: Dict[str, PerformancePredictor] = {}
 _difficulty_estimators: Dict[str, DifficultyEstimator] = {}
 _grading_orchestrator = GradingOrchestrator()
+
+# ── ML Model Persistence & Dynamic Attachment ──────────────────────────────
+_loaded_logistic_model = None
+_loaded_anomaly_model = None
+
+def _get_active_models():
+    global _loaded_logistic_model, _loaded_anomaly_model
+    if _loaded_logistic_model is not None and _loaded_anomaly_model is not None:
+        return _loaded_logistic_model, _loaded_anomaly_model
+    import pickle
+    from pathlib import Path
+    models_dir = Path(__file__).parent.parent.parent / "models"
+    log_pkl = models_dir / "logistic_model.pkl"
+    ano_pkl = models_dir / "anomaly_model.pkl"
+    if log_pkl.exists() and _loaded_logistic_model is None:
+        try:
+            with open(log_pkl, "rb") as f:
+                _loaded_logistic_model = pickle.load(f)
+        except Exception:
+            pass
+    if ano_pkl.exists() and _loaded_anomaly_model is None:
+        try:
+            with open(ano_pkl, "rb") as f:
+                _loaded_anomaly_model = pickle.load(f)
+        except Exception:
+            pass
+    return _loaded_logistic_model, _loaded_anomaly_model
+
+def _create_proctoring_agent(config=None):
+    agent = ProctoringAgent(config or _config)
+    log_m, ano_m = _get_active_models()
+    if log_m is not None or ano_m is not None:
+        agent.set_models(logistic_model=log_m, anomaly_model=ano_m)
+    return agent
 _audit_chain = AuditChain(db_path=str(DB_PATH.parent / "audit_chain.db"))
 _math_grader = MathematicalGrader()
 _prog_grader = ProgrammingGrader()
@@ -369,8 +403,8 @@ def create_session():
         "started_at": session_created_at,
     }
 
-    # Initialize proctoring agent for this session
-    agent = ProctoringAgent(_config)
+    # Initialize proctoring agent for this session with active trained ML models
+    agent = _create_proctoring_agent(_config)
     _proctoring_agents[session_key] = agent
 
     # Initialize evidence log
@@ -634,7 +668,7 @@ def process_proctor_signals(student_id=None, exam_id=None):
 
     agent = _proctoring_agents.get(session_key)
     if not agent:
-        agent = ProctoringAgent(_config)
+        agent = _create_proctoring_agent(_config)
         _proctoring_agents[session_key] = agent
         if session_key not in _evidence_logs:
             _evidence_logs[session_key] = EvidenceLog(session_id=session_key)
@@ -1417,9 +1451,21 @@ def auth_register():
         return jsonify({"error": "Username already exists"}), 409
     if auth_db.get_user_by_email(data["email"]):
         return jsonify({"error": "Email already exists"}), 409
-    role_str = data["role"]
+    role_str = data.get("role", "student")
     if role_str not in ("super_admin", "admin", "examiner", "student", "viewer"):
         return jsonify({"error": "Invalid role"}), 400
+
+    # RBAC: Public registration cannot escalate privileges.
+    # Registering as super_admin, admin, or examiner requires an active admin session,
+    # unless bootstrapping an empty system with no existing privileged users.
+    if role_str in ("super_admin", "admin", "examiner"):
+        caller_token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        caller = auth_db.get_session_user(caller_token) if caller_token else None
+        existing_privileged = [u for u in auth_db.list_users() if u.get("role") in ("admin", "super_admin", "examiner")]
+        if existing_privileged and (not caller or caller.get("role") not in ("admin", "super_admin")):
+            return jsonify({
+                "error": "Privilege escalation denied: Administrator token required to register privileged roles."
+            }), 403
     user_id = auth_db.create_user(
         username=data["username"], email=data["email"],
         full_name=data["full_name"], password=data["password"],
@@ -2398,6 +2444,26 @@ def training_train():
         except Exception as e:
             results["anomaly_detection"] = {"status": "error", "error": str(e)}
 
+        # ── Step 6: Persist models & update live agents ───────────────────────
+        try:
+            import pickle
+            from pathlib import Path
+            global _loaded_logistic_model, _loaded_anomaly_model
+            _loaded_logistic_model = model
+            _loaded_anomaly_model = detector if 'detector' in locals() else None
+            m_dir = Path(__file__).parent.parent.parent / "models"
+            m_dir.mkdir(parents=True, exist_ok=True)
+            with open(m_dir / "logistic_model.pkl", "wb") as f:
+                pickle.dump(model, f)
+            if _loaded_anomaly_model is not None:
+                with open(m_dir / "anomaly_model.pkl", "wb") as f:
+                    pickle.dump(_loaded_anomaly_model, f)
+            # Propagate newly trained models to all active proctoring agents
+            for a in _proctoring_agents.values():
+                a.set_models(logistic_model=_loaded_logistic_model, anomaly_model=_loaded_anomaly_model)
+        except Exception as pe:
+            results["model_persistence_warning"] = str(pe)
+
     except Exception as e:
         results["error"] = str(e)
         training_record["error"] = str(e)
@@ -2620,8 +2686,8 @@ def change_password():
         return jsonify({"error": "Current password is incorrect"}), 401
 
     # Update password
-    import hashlib
-    new_hash = hashlib.sha256(new_pass.encode()).hexdigest()
+    from src.database.auth import hash_password
+    new_hash = hash_password(new_pass)
     _get_auth_db()._conn.execute(
         "UPDATE users SET password_hash = ? WHERE user_id = ?",
         (new_hash, user["user_id"]))

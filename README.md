@@ -210,7 +210,7 @@ Camera Frame → Local Processing → Features → Discard
 - **No external API calls**
 - **All processing on-device**
 - **No biometric templates stored**
-- **GDPR/FERPA compliant by design**
+- **Privacy-first architecture designed to support institutional GDPR/FERPA compliance**
 
 #### 4. Explainable Risk
 

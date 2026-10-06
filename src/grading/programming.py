@@ -14,6 +14,7 @@ import ast
 import time
 import math
 import traceback
+import concurrent.futures
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable
 
@@ -298,23 +299,43 @@ class ProgrammingGrader:
         local_scope = {}
 
 
-        try:
-            exec(code_str, safe_globals, local_scope)
-        except Exception as exc:
-            return ProgrammingGradingResult(
-                score=0.0,
-                max_score=marks,
-                percentage=0.0,
-                syntax_valid=True,
-                security=security_report,
-                cyclomatic_complexity=cyclomatic,
-                loop_nesting_depth=loop_depth,
-                total_tests=len(public_tests) + len(hidden_tests) + len(edge_cases),
-                passed_tests=0,
-                test_results=[],
-                style_score=style_score,
-                explanation=f"Runtime error during script initialization: {str(exc)}",
-            )
+        timeout_sec = max(0.2, float(self.execution_timeout_seconds))
+
+        # Enforce initialization timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            init_future = executor.submit(exec, code_str, safe_globals, local_scope)
+            try:
+                init_future.result(timeout=timeout_sec)
+            except concurrent.futures.TimeoutError:
+                return ProgrammingGradingResult(
+                    score=0.0,
+                    max_score=marks,
+                    percentage=0.0,
+                    syntax_valid=True,
+                    security=security_report,
+                    cyclomatic_complexity=cyclomatic,
+                    loop_nesting_depth=loop_depth,
+                    total_tests=len(public_tests) + len(hidden_tests) + len(edge_cases),
+                    passed_tests=0,
+                    test_results=[],
+                    style_score=0.0,
+                    explanation=f"Execution timed out during initialization (> {timeout_sec}s). Infinite loop or excessive computation detected.",
+                )
+            except Exception as exc:
+                return ProgrammingGradingResult(
+                    score=0.0,
+                    max_score=marks,
+                    percentage=0.0,
+                    syntax_valid=True,
+                    security=security_report,
+                    cyclomatic_complexity=cyclomatic,
+                    loop_nesting_depth=loop_depth,
+                    total_tests=len(public_tests) + len(hidden_tests) + len(edge_cases),
+                    passed_tests=0,
+                    test_results=[],
+                    style_score=style_score,
+                    explanation=f"Runtime error during script initialization: {str(exc)}",
+                )
 
         fn = local_scope.get(entry_function_name)
         if not callable(fn):
@@ -354,9 +375,15 @@ class ProgrammingGrader:
             passed = False
 
             try:
-                actual = fn(*args, **kwargs)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as item_executor:
+                    future = item_executor.submit(fn, *args, **kwargs)
+                    actual = future.result(timeout=timeout_sec)
                 t_elapsed = (time.perf_counter() - t0) * 1000.0
                 passed = actual == expected
+            except concurrent.futures.TimeoutError:
+                t_elapsed = (time.perf_counter() - t0) * 1000.0
+                err_msg = f"TimeoutError: Execution exceeded limit of {timeout_sec}s"
+                passed = False
             except Exception as e:
                 t_elapsed = (time.perf_counter() - t0) * 1000.0
                 err_msg = f"{type(e).__name__}: {str(e)}"

@@ -3,6 +3,8 @@
 import json
 import uuid
 import hashlib
+import hmac
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Any
@@ -78,9 +80,28 @@ CREATE INDEX IF NOT EXISTS idx_exam_perms_exam ON exam_permissions(exam_id);
 """
 
 
-def hash_password(password: str) -> str:
-    """Hash a password with SHA-256 (demo only — use bcrypt in production)."""
-    return hashlib.sha256(password.encode()).hexdigest()
+def hash_password(password: str, salt: Optional[str] = None) -> str:
+    """Hash password using PBKDF2-HMAC-SHA256 with 100,000 iterations and 16-byte random salt."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
+    return f"pbkdf2:sha256:100000${salt}${key.hex()}"
+
+
+def verify_password_hash(password: str, stored_hash: str) -> bool:
+    """Constant-time verification of password against stored hash (PBKDF2 or legacy SHA-256)."""
+    if not stored_hash or not password:
+        return False
+    if stored_hash.startswith("pbkdf2:sha256:"):
+        parts = stored_hash.split("$")
+        if len(parts) == 3:
+            salt = parts[1]
+            expected_hex = parts[2]
+            key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
+            return hmac.compare_digest(key.hex(), expected_hex)
+    # Legacy SHA-256 comparison for backwards compatibility with earlier test runs
+    legacy_hex = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(legacy_hex, stored_hash)
 
 
 class AuthDatabase:
@@ -204,7 +225,7 @@ class AuthDatabase:
                 self.get_user_by_email(username_or_email))
         if not user:
             return None
-        if user.get("password_hash") != hash_password(password):
+        if not verify_password_hash(password, user.get("password_hash")):
             return None
         if not user.get("is_active", 1):
             return None
