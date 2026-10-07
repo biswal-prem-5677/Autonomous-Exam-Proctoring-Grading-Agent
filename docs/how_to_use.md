@@ -36,31 +36,35 @@ python main.py grade answers.json
 python main.py test
 ```
 
-### Option 2: Student Exam Interface
+### Option 2: Web Application (Localhost Demonstration)
+
+Launch the unified proctoring & grading web application:
 
 ```bash
-streamlit run app/student/exam.py
+python main.py
+# or
+python -m app.backend
 ```
 
-This opens the student exam portal in your browser. Steps:
-1. Select your student identity from the dropdown
-2. Set exam duration (10-120 minutes)
-3. Click "Start Exam"
-4. Answer questions (MCQ, numerical, or text)
-5. Navigate using Previous/Next buttons
-6. Submit when done
+Open your browser to: **http://localhost:5000**
 
-### Option 3: Examiner Dashboard
-
-```bash
-streamlit run app/examiner/dashboard.py
-```
-
-This opens the examiner monitoring dashboard. View:
-- Score distribution across students
-- Risk analysis summary
-- Per-student details
-- Flagged students requiring review
+#### Demonstration Portals:
+1. **Portal Home (`/`)**: Main entrypoint with quick navigation to all interfaces.
+2. **Student Exam Session (`/student/exam`)**:
+   - Live proctored exam with real-time webcam feed and face tracking
+   - Real-time keystroke/mouse telemetry and tab switch detection
+   - Dynamic question navigation (MCQ, Math, Code, Short Answer)
+   - Real-time countdown timer and instant submission
+3. **Examiner Live Dashboard (`/examiner/dashboard`)**:
+   - Real-time candidate monitoring and risk telemetry
+   - Evidence log with multimodal corroboration audit trail
+   - Flagged candidate status requiring examiner review
+4. **Exam Authoring (`/examiner/create-exam`)**:
+   - Interactive question creation with test cases and rubrics
+5. **Grading & Audit Inspection (`/examiner/grading`)**:
+   - Multi-grader scoring consensus, sandbox code execution, and rubric breakdown
+6. **Analytics & ML Training (`/analytics`, `/training`)**:
+   - ROC/PR curves, model calibration, and synthetic dataset anomaly training
 
 ---
 
@@ -336,9 +340,11 @@ pip install pytest
 python main.py test
 ```
 
-**Streamlit not found?**
+**Port 5000 already in use?**
 ```bash
-pip install streamlit
+python main.py serve --port 5001
+# or
+python -m app.backend --port 5001
 ```
 
 **MediaPipe import error?**

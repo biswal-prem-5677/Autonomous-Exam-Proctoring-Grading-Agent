@@ -5,7 +5,7 @@ import uuid
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, List
 import sqlite3
@@ -121,7 +121,7 @@ class AuthDatabase:
     # ── Organizations ──────────────────────────────────────────────────────────
 
     def create_org(self, name: str, admin_id: str, org_type: str = "university",
-                   settings: Dict = None) -> str:
+                   settings: Optional[Dict] = None) -> str:
         org_id = f"org_{uuid.uuid4().hex[:8]}"
         self._conn.execute(
             "INSERT INTO organizations (org_id, name, org_type, admin_id, settings) VALUES (?, ?, ?, ?, ?)",
@@ -152,7 +152,7 @@ class AuthDatabase:
     def create_user(self, username: str, email: str, full_name: str,
                     password: str, role: str = "student",
                     org_id: Optional[str] = None,
-                    preferences: Dict = None) -> str:
+                    preferences: Optional[Dict] = None) -> str:
         user_id = f"user_{uuid.uuid4().hex[:8]}"
         self._conn.execute(
             "INSERT INTO users (user_id, username, email, full_name, password_hash, role, org_id, preferences) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -223,12 +223,13 @@ class AuthDatabase:
                 self.get_user_by_email(username_or_email))
         if not user:
             return None
-        if not verify_password_hash(password, user.get("password_hash")):
+        stored_hash = user.get("password_hash")
+        if not stored_hash or not verify_password_hash(password, str(stored_hash)):
             return None
         if not user.get("is_active", 1):
             return None
         # Update last login
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
             "UPDATE users SET last_login = ? WHERE user_id = ?", (now, user["user_id"]))
         self._conn.commit()
@@ -244,7 +245,7 @@ class AuthDatabase:
 
     def create_session(self, user_id: str, expires_hours: int = 24) -> str:
         token = uuid.uuid4().hex
-        expires = (datetime.utcnow() + timedelta(hours=expires_hours)).isoformat()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=expires_hours)).isoformat()
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
         self._conn.execute(
             "INSERT INTO auth_sessions (session_id, user_id, token, expires_at) VALUES (?, ?, ?, ?)",
@@ -257,7 +258,7 @@ class AuthDatabase:
             """SELECT u.* FROM auth_sessions a
                JOIN users u ON a.user_id = u.user_id
                WHERE a.token = ? AND a.expires_at > ?""",
-            (token, datetime.utcnow().isoformat())).fetchone()
+            (token, datetime.now(timezone.utc).isoformat())).fetchone()
         if not row:
             return None
         d = dict(row)
@@ -301,7 +302,7 @@ class AuthDatabase:
                (exam_id, settings, instructions, passing_score, updated_at)
                VALUES (?, ?, ?, ?, ?)""",
             (exam_id, json.dumps(settings), instructions, passing_score,
-             datetime.utcnow().isoformat()))
+             datetime.now(timezone.utc).isoformat()))
         self._conn.commit()
 
     def get_exam_settings(self, exam_id: str) -> Optional[Dict]:

@@ -508,13 +508,25 @@ python main.py demo
 # Run tests
 python main.py test
 
-# Launch the web application (Flask — student + examiner UI)
+# Launch the web application (Flask & HTML/JS Frontend)
 python main.py
 # or
-python -m app.api.server
+python -m app.backend
 
 # Open in browser: http://localhost:5000
 ```
+
+### Localhost Demonstration Checklist
+
+| Feature | URL | Description |
+|---|---|---|
+| **Home Portal** | `http://localhost:5000/` | Landing page linking to all student and examiner workflows |
+| **Student Exam** | `http://localhost:5000/student/exam` | Full proctored exam experience with live webcam, telemetry, question navigation |
+| **Examiner Dashboard** | `http://localhost:5000/examiner/dashboard` | Live real-time risk monitor, timeline, candidate status, and evidence viewer |
+| **Exam Creation** | `http://localhost:5000/examiner/create-exam` | Interactive exam creator for MCQ, Code, Mathematical, and Free-text questions |
+| **Grading Portal** | `http://localhost:5000/examiner/grading` | Multi-grader consensus, automated code execution sandbox, and rubric grading |
+| **Analytics** | `http://localhost:5000/analytics` | System-wide statistics, exam trends, and candidate performance |
+| **ML Training** | `http://localhost:5000/training` | In-browser model retraining and calibration on synthetic behavioral data |
 
 ### Configuration
 

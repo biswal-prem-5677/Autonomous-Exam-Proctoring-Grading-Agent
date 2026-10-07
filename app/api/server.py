@@ -8,7 +8,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 
@@ -191,6 +191,7 @@ def examiner_grading():
 
 
 @app.route("/examiner/create_exam")
+@app.route("/examiner/create-exam")
 def examiner_create_exam():
     """Examiner create exam page."""
     return render_template("examiner/create_exam.html")
@@ -236,6 +237,12 @@ def monitor_page():
 def training():
     """Model training page."""
     return render_template("training.html")
+
+
+@app.route("/analytics")
+def analytics_page():
+    """Analytics dashboard page."""
+    return render_template("analytics.html")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1970,7 +1977,7 @@ def update_evidence_entry(session_id, entry_id):
                 e.review_state = data.get("review_state", e.review_state)
                 e.review_note = data.get("review_note", e.review_note)
                 e.reviewed_by = str(user.get("full_name") or user.get("username") or "")
-                e.reviewed_at = datetime.utcnow()
+                e.reviewed_at = datetime.now(timezone.utc)
                 return jsonify({"entry": e.to_dict(), "message": "Updated"})
     return jsonify({"error": "Entry not found"}), 404
 

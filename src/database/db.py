@@ -4,7 +4,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -154,7 +154,7 @@ class Database:
         with self._write_lock:
             self._conn.execute(
                 "UPDATE sessions SET ended_at = ?, state = 'ended' WHERE session_id = ?",
-                (datetime.utcnow().isoformat(), session_id),
+                (datetime.now(timezone.utc).isoformat(), session_id),
             )
             self._conn.commit()
 
