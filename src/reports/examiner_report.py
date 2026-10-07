@@ -19,7 +19,7 @@ class ExaminerReportGenerator:
         self.report_data: Dict[str, Any] = {}
 
     def generate(self, exam_id: str, student_reports: List[Dict[str, Any]],
-                 exam_config: Dict[str, Any] = None) -> Dict[str, Any]:
+                 exam_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate an examiner report for an entire exam session.
 
         Args:

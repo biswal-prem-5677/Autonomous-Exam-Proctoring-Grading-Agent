@@ -6,10 +6,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-def load_config(config_path: str = None) -> dict:
+from typing import Optional, Union, Dict, Any
+
+
+def load_config(config_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """Load configuration from YAML file with environment variable overrides."""
     load_dotenv()
 
+    target_path: Optional[Path] = None
     if config_path is None:
         # Try multiple possible locations
         possible_paths = [
@@ -19,18 +23,18 @@ def load_config(config_path: str = None) -> dict:
         ]
         for p in possible_paths:
             if p.exists():
-                config_path = p
+                target_path = p
                 break
         else:
             # Return default config if no file found
             return {"app": {"name": "Exam Agent", "version": "1.0.0"}}
     else:
-        config_path = Path(config_path)
+        target_path = Path(config_path)
 
-    if not config_path.exists():
+    if not target_path or not target_path.exists():
         return {"app": {"name": "Exam Agent", "version": "1.0.0"}, "risk": {}, "grading": {}, "proctoring": {}}
 
-    with open(config_path, "r") as f:
+    with open(target_path, "r") as f:
         config = yaml.safe_load(f)
 
     # Override with environment variables if present

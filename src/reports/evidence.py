@@ -52,7 +52,7 @@ class EvidenceLog:
 
     def add(self, event_type: str, severity: str, confidence: float,
             description: str, signal_source: str = "",
-            metadata: Dict = None) -> EvidenceEntry:
+            metadata: Optional[Dict] = None) -> EvidenceEntry:
         """Add a new evidence entry."""
         # Auto-classify severity if not provided
         if not severity:

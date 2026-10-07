@@ -101,7 +101,6 @@ CREATE INDEX IF NOT EXISTS idx_session_meta_active ON session_meta(is_active);
 def init_db(db_path: Optional[Path] = None) -> None:
     """Create tables if they don't exist."""
     global DB_PATH
-    target = db_path or DB_PATH
     if db_path:
         DB_PATH = db_path
     _ensure_parent()
@@ -115,8 +114,8 @@ class Database:
     """High-level database interface for the exam agent."""
 
     def __init__(self, db_path: Optional[Path] = None):
+        global DB_PATH
         if db_path:
-            global DB_PATH
             DB_PATH = db_path
         _ensure_parent()
         # check_same_thread=False is safe here because we serialise writes via
