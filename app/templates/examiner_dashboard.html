@@ -575,11 +575,18 @@ function renderStudentDetail(data) {
         <div class="detail-header">
             <div>
                 <h3>${escapeHtml(data.student_id)}</h3>
-                <p class="text-secondary">${escapeHtml(data.exam_title)}</p>
+                <p class="text-secondary">${escapeHtml(data.exam_title || data.exam_id || 'Exam')}</p>
+                <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'warn')">⚠️ Issue Warning</button>
+                    <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'flag')">🚩 Flag Incident</button>
+                    <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'pause')">⏸️ Pause Exam</button>
+                    <button class="btn btn-sm btn-danger" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'terminate')">🛑 Terminate</button>
+                    <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'note')">📝 Add Note</button>
+                </div>
             </div>
             <div style="display: flex; gap: 16px; align-items: center;">
                 <div style="text-align: center;">
-                    <div class="stat-value ${gradeColor}" style="font-size: 1.75rem;">${grading.percentage.toFixed(1)}%</div>
+                    <div class="stat-value ${gradeColor}" style="font-size: 1.75rem;">${grading.percentage ? grading.percentage.toFixed(1) : 0}%</div>
                     <div class="stat-label">Score</div>
                 </div>
                 <div style="text-align: center;">
@@ -643,6 +650,41 @@ function renderStudentDetail(data) {
             }).join('') : '<div style="color: var(--text-muted); font-size: 0.875rem;">No grading data available</div>'}
         </div>
     `;
+}
+
+async function promptExaminerAction(studentId, examId, actionType) {
+    const actionLabels = {
+        warn: 'Issue Official Warning to Student',
+        flag: 'Flag Exam Session for Review',
+        pause: 'Temporarily Pause Exam for Student',
+        terminate: 'Immediately Terminate Exam Session',
+        note: 'Attach Examiner Observation Note'
+    };
+    const defaultMsg = actionType === 'warn' ? 'Unusual head movement / gaze detected. Please face the screen.'
+                     : actionType === 'terminate' ? 'Severe integrity policy violation observed.'
+                     : actionType === 'pause' ? 'Proctoring verification required.'
+                     : 'Examiner observation recorded.';
+
+    const message = prompt(`${actionLabels[actionType] || actionType}:\nEnter note / reason:`, defaultMsg);
+    if (message === null) return; // user cancelled
+
+    try {
+        const sessionKey = `${studentId}:${examId}`;
+        const resp = await App.apiPost('/api/examiner/action', {
+            action_type: actionType,
+            session_key: sessionKey,
+            session_id: sessionKey,
+            student_id: studentId,
+            exam_id: examId,
+            message: message,
+            examiner_id: App.currentUser?.username || 'examiner',
+        });
+        alert(`Examiner action "${actionType.toUpperCase()}" successfully recorded! Action ID: ${resp.action_id}`);
+        // Refresh detail view
+        selectStudent(studentId);
+    } catch (e) {
+        alert('Failed to record examiner action: ' + e.message);
+    }
 }
 </script>
 {% endblock %}

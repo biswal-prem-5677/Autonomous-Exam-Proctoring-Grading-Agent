@@ -502,31 +502,52 @@ venv\Scripts\activate  # Windows
 # Install dependencies
 pip install -r requirements.txt
 
-# Run demo
-python main.py demo
-
-# Run tests
-python main.py test
+# Run full test suite (344 tests passing)
+python -m pytest
 
 # Launch the web application (Flask & HTML/JS Frontend)
 python main.py
-# or
-python -m app.backend
 
 # Open in browser: http://localhost:5000
 ```
 
-### Localhost Demonstration Checklist
+---
 
-| Feature | URL | Description |
-|---|---|---|
-| **Home Portal** | `http://localhost:5000/` | Landing page linking to all student and examiner workflows |
-| **Student Exam** | `http://localhost:5000/student/exam` | Full proctored exam experience with live webcam, telemetry, question navigation |
-| **Examiner Dashboard** | `http://localhost:5000/examiner/dashboard` | Live real-time risk monitor, timeline, candidate status, and evidence viewer |
-| **Exam Creation** | `http://localhost:5000/examiner/create-exam` | Interactive exam creator for MCQ, Code, Mathematical, and Free-text questions |
-| **Grading Portal** | `http://localhost:5000/examiner/grading` | Multi-grader consensus, automated code execution sandbox, and rubric grading |
-| **Analytics** | `http://localhost:5000/analytics` | System-wide statistics, exam trends, and candidate performance |
-| **ML Training** | `http://localhost:5000/training` | In-browser model retraining and calibration on synthetic behavioral data |
+## Role-Based Interfaces, URLs & Backend Surfaces
+
+Every implemented backend capability is surfaced to the appropriate role with strict psychological safety boundaries:
+
+### 1. Student Portal
+*Strict psychological safety guarantee: Students NEVER see risk scores, confidence bounds, or decision traces.*
+
+| Page Name | URL | Backing `src/` Modules | Capabilities |
+|---|---|---|---|
+| **Student Exam** | `http://localhost:5000/student/exam` | `src.exam.session`, `src.sensors`, `src.database.db` | Proctored test environment with live camera preview, countdown timer, auto-submit, debounced autosave, question navigator, and renderers for MCQ, True/False, Numerical, Mathematical (formula input), Code (programming), and Short/Long Answer. |
+| **Student Results** | `http://localhost:5000/student/results` | `src.database.db`, `src.reports.student_report` | Release-gated score summary, question-by-question feedback, and integrity status ("Verified & Intact"). Blocked until examiner explicitly publishes release. |
+
+### 2. Examiner Console
+*Full observability, live intervention, forensic replay, and grading control.*
+
+| Page Name | URL | Backing `src/` Modules | Capabilities |
+|---|---|---|---|
+| **Examiner Dashboard** | `http://localhost:5000/examiner/dashboard` | `src.agent.controller`, `src.database.db`, `src.reports.evidence` | Real-time candidate monitoring, active session list, live intervention actions (`warn`, `flag`, `pause`, `terminate`, `note`), roster management, and evidence log. |
+| **Exam Builder** | `http://localhost:5000/examiner/create-exam` | `src.exam.questions`, `src.exam.exam`, `src.context.ExamPolicy` | Rich authoring for all 7 question types (MCQ, True/False, Numerical, Short/Long Answer with keywords and model answers, Math formulas, Programming with test cases), exam instructions, passing scores, and proctoring policies. |
+| **Grading & Overrides** | `http://localhost:5000/examiner/grading` | `src.grading.scorer`, `src.grading.consensus`, `src.grading.plagiarism`, `src.database.db` | Automated evaluation review, SymPy math step verification, AST Python sandbox test results, plagiarism cohort scan, inter-grader consensus, manual score override with mandatory reason, and final release gate control. |
+| **Live Telemetry Monitor** | `http://localhost:5000/monitor` | `src.trace.replay`, `src.trace.audit_chain`, `src.agent.counterfactual`, `src.fusion` | Second-by-second forensic replay scrubber, multimodal corroboration breakdown, SHAP/counterfactual attribution, uncertainty intervals, and cryptographic SHA-256 audit chain. |
+| **Performance Analytics** | `http://localhost:5000/analytics` | `src.prediction.performance`, `src.prediction.difficulty`, `src.prediction.knowledge` | Real database analytics (no synthetic data): score distributions, pass rates, Item Response Theory (IRT) question difficulty curves, and Bayesian knowledge tracing. |
+| **ML Model Studio** | `http://localhost:5000/training` | `src.ml.pipeline`, `src.ml.logistic`, `src.ml.anomaly`, `src.ml.calibration` | In-browser model retraining, ROC-AUC evaluation, confusion matrix visualization, and real-time model hot-swapping into active proctoring agents. |
+
+### 3. Administrator & Ops
+*Cryptographic verification, system governance, and security auditing.*
+
+| Page Name | URL | Backing `src/` Modules | Capabilities |
+|---|---|---|---|
+| **Admin Console** | `http://localhost:5000/dashboard` | `src.database.auth`, `src.trace.audit_chain`, `src.ml.adversarial` | User/organization provisioning, role assignments, cryptographic audit chain hash verification, and automated red-team adversarial benchmark execution. |
+| **System Health** | `http://localhost:5000/api/health` | `src.database.db` | JSON status reporting server uptime, active sessions, and ML model readiness. |
+
+For a line-by-line mapping of all 76 API routes and all public classes, see the [UI Traceability Matrix](docs/UI_TRACEABILITY.md).
+
+---
 
 ### Configuration
 
@@ -548,39 +569,60 @@ grading:
 ## Project Structure
 
 ```
-autonomous-exam-agent/
-├── README.md
-├── requirements.txt
-├── pyproject.toml
+Autonomous-Exam-Proctoring-Grading-Agent/
+├── main.py                     # Primary entry point (Flask web application)
+├── pyproject.toml              # Build & test configuration
+├── requirements.txt            # Python dependencies
 ├── config/
-│   └── default.yaml
+│   └── default.yaml            # Proctoring, risk, and grading thresholds
 ├── app/
-│   ├── student/exam.py         # Student exam interface
-│   └── examiner/dashboard.py   # Examiner dashboard
+│   ├── api/
+│   │   └── server.py           # Unified REST API & route handlers (3,400+ lines)
+│   ├── static/
+│   │   ├── css/                # Styling and responsive UI design system
+│   │   └── js/
+│   │       ├── api.js          # Unified API client & authentication
+│   │       └── app.js          # Common frontend state & DOM helpers
+│   └── templates/
+│       ├── base.html           # Unified navigation layout & role gating
+│       ├── index.html          # Public landing portal
+│       ├── dashboard.html      # Admin & session dashboard
+│       ├── analytics.html      # Real database performance analytics
+│       ├── training.html       # ML training & calibration studio
+│       ├── examiner_dashboard.html # Examiner live monitor & interventions
+│       ├── auth/               # Login & registration views
+│       ├── examiner/           # Create exam & grading interfaces
+│       ├── monitor/            # Live telemetry & trace replay interfaces
+│       └── student/            # Proctored exam runner & results views
 ├── src/
-│   ├── agent/                  # Autonomous agent
-│   ├── audio/                  # Audio processing
-│   ├── exam/                   # Exam engine
-│   ├── features/               # Feature engineering
-│   ├── grading/                # Grading engine
-│   ├── ml/                     # ML models
-│   ├── models/                 # Data models
-│   ├── prediction/             # Performance prediction
-│   ├── reports/                # Report generators
-│   ├── sensors/               # Hardware inputs
-│   ├── utils/                 # Utilities
-│   └── vision/                # Computer vision
-├── data/
-│   └── sample_data.py         # Demo data
+│   ├── agent/                  # Autonomous perception, risk, and state machine
+│   ├── audio/                  # Audio feature extraction (RMS, ZCR, centroid)
+│   ├── baseline/               # Student typing & posture baselines
+│   ├── context/                # Exam policy and resource rules
+│   ├── database/               # SQLite DB layer (exams, roster, overrides, actions, auth)
+│   ├── exam/                   # Question models, exam lifecycle, session management
+│   ├── features/               # Behavioral, keystroke, and mouse dynamics
+│   ├── fusion/                 # Cross-modal corroboration & contradiction detection
+│   ├── grading/                # Multi-modal grading (MCQ, Num, Math, Code, Text, Plagiarism)
+│   ├── ml/                     # Logistic regression, anomaly detection, calibration, red-team
+│   ├── models/                 # Core domain entities & schemas
+│   ├── prediction/             # Performance projection, IRT difficulty, knowledge tracing
+│   ├── reports/                # Student & examiner report generators, evidence logs
+│   ├── sensors/                # Webcam, keyboard, mouse, browser event listeners
+│   ├── trace/                  # Integrity decision traces, replay engine, SHA-256 audit chain
+│   ├── utils/                  # Configuration & logging helpers
+│   └── vision/                 # Face tracking (MediaPipe + Haar Cascade fallback), landmarks
 ├── docs/
-│   ├── planning.md            # Project plan
-│   ├── features/              # Feature specifications
-│   ├── references/            # Literature & projects
-│   ├── research/              # Research papers
-│   └── ...
-├── tests/
-│   └── test_agent.py          # Test suite
-└── main.py                    # CLI entry point
+│   ├── UI_TRACEABILITY.md      # Complete route & class traceability matrix
+│   ├── planning.md             # Architecture & design documentation
+│   └── research/               # Research foundations & citations
+└── tests/
+    ├── test_agent.py           # Core agent tests
+    ├── test_defect_regressions.py # Regression test suite for all 13 defect fixes
+    ├── test_ui_e2e.py          # End-to-end browser & workflow tests
+    ├── test_sandbox.py         # Code execution sandbox security tests
+    ├── test_vision.py          # Face tracking & posture tests
+    └── test_world_class_agent.py # End-to-end system integration tests
 ```
 
 ---

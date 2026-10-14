@@ -265,7 +265,7 @@ class ProctoringAgent:
                 risk_result=result,
                 risk_engine=self.risk_engine,
                 evidence_memory=self.evidence_memory,
-                agent_state=self._state.value,
+                agent_state=new_state.value,
                 real_context=self.context,
                 real_baseline=self.baseline,
             ).to_dict()
@@ -480,26 +480,29 @@ class ProctoringAgent:
             src = evt.get("source")
             if src:
                 observed_modalities.add(src)
-        if signals.get("face_present", True):
+        if signals.get("face_present", True) or "vision" in observed_modalities:
             observed_modalities.add("vision")
-        if signals.get("mic_active", True):
+        if signals.get("mic_active", True) or "audio" in observed_modalities:
             observed_modalities.add("audio")
-        if signals.get("typing_wpm", 0) > 0:
+        kb_sig = signals.get("keyboard", {}) if isinstance(signals.get("keyboard"), dict) else {}
+        if signals.get("typing_wpm", 0) > 0 or signals.get("keyboard_events_per_minute", 0) > 0 or kb_sig.get("events_per_minute", 0) > 0 or "keyboard" in observed_modalities:
             observed_modalities.add("keyboard")
-        if signals.get("mouse_velocity", 0) > 0:
+        mouse_sig = signals.get("mouse", {}) if isinstance(signals.get("mouse"), dict) else {}
+        if signals.get("mouse_velocity", 0) > 0 or signals.get("mouse_avg_speed", 0) > 0 or mouse_sig.get("avg_speed", 0) > 0 or "mouse" in observed_modalities:
             observed_modalities.add("mouse")
-        if signals.get("browser_active", True):
+        if signals.get("browser_active", True) or "browser" in observed_modalities:
             observed_modalities.add("browser")
 
         signal_confidences = {
             evt.get("source", "general"): evt.get("confidence", 0.5)
             for evt in events
         }
+        corrob_score = 0.85 if len(observed_modalities) >= 3 else (0.70 if len(observed_modalities) >= 2 else 0.35)
         uncertainty_estimate = self.uncertainty_engine.evaluate(
             observed_modalities=observed_modalities,
             signal_confidences=signal_confidences,
             prediction_prob=predictions.get("logistic_risk"),
-            corroboration_score=0.7 if len(observed_modalities) >= 2 else 0.3,
+            corroboration_score=corrob_score,
         )
 
         # Counterfactual causal attribution
@@ -542,11 +545,18 @@ class ProctoringAgent:
 
         # 2. Check signal quality and uncertainty
         active_signals = self.evidence_memory.count_active_signals()
+        event_modalities = {evt.get("source") for evt in events if evt.get("source")}
+        has_multi_modal_corroboration = len(event_modalities) >= multi_signal or active_signals >= multi_signal
+
         if uncertainty_estimate and not uncertainty_estimate.is_actionable:
-            # Epistemic/aleatoric uncertainty is high — do not prematurely escalate
-            if risk_score >= review:
+            # Epistemic/aleatoric uncertainty is high — do not prematurely escalate UNLESS
+            # multi-signal / multi-modal corroboration is established at high risk
+            if risk_score >= escalation and has_multi_modal_corroboration:
+                pass  # Allow risk-based escalation
+            elif risk_score >= review:
                 return self._transition_state(AgentState.MONITOR)
-            return self._transition_state(AgentState.INSUFFICIENT_EVIDENCE if events else AgentState.NORMAL)
+            else:
+                return self._transition_state(AgentState.INSUFFICIENT_EVIDENCE if events else AgentState.NORMAL)
 
         if active_signals == 0 and events:
             return self._transition_state(AgentState.INSUFFICIENT_EVIDENCE)

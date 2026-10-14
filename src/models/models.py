@@ -50,6 +50,7 @@ class Question:
             "marks": self.marks,
             "keywords": self.keywords,
             "tolerance": self.tolerance,
+            "rubric": self.rubric,
             "metadata": self.metadata,
         }
 
@@ -66,36 +67,140 @@ class ProctoringEvent:
 @dataclass
 class Exam:
     """Represents an exam with questions."""
-    exam_id: str
-    title: str
-    duration_minutes: int
+    exam_id: str = ""
+    title: str = "Untitled Exam"
+    duration_minutes: int = 60
     questions: List[Question] = field(default_factory=list)
     topic: str = ""
     difficulty: str = "medium"
+    instructions: str = ""
+    passing_score: float = 40.0
+    is_released: bool = False
+    settings: Dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
+
+    def __init__(
+        self,
+        exam_id: str = "",
+        title: str = "Untitled Exam",
+        duration_minutes: int = 60,
+        questions: Optional[List[Question]] = None,
+        topic: str = "",
+        difficulty: str = "medium",
+        instructions: str = "",
+        passing_score: float = 40.0,
+        is_released: bool = False,
+        settings: Optional[Dict[str, Any]] = None,
+        created_at: Optional[datetime] = None,
+        **kwargs
+    ):
+        self.exam_id = exam_id or kwargs.get("id", "")
+        self.title = title
+        self.duration_minutes = int(duration_minutes)
+        self.questions = questions if questions is not None else []
+        self.topic = topic
+        self.difficulty = difficulty
+        self.instructions = instructions
+        self.passing_score = float(passing_score)
+        self.is_released = bool(is_released)
+        self.settings = settings if settings is not None else {}
+        self.created_at = created_at if created_at is not None else datetime.now()
 
     @property
     def id(self) -> str:
         """Alias for exam_id for compatibility."""
         return self.exam_id
 
+    def to_dict(self) -> dict:
+        return {
+            "exam_id": self.exam_id,
+            "id": self.exam_id,
+            "title": self.title,
+            "duration_minutes": self.duration_minutes,
+            "topic": self.topic,
+            "difficulty": self.difficulty,
+            "instructions": self.instructions,
+            "passing_score": self.passing_score,
+            "is_released": self.is_released,
+            "settings": self.settings,
+            "created_at": self.created_at.isoformat() if hasattr(self.created_at, "isoformat") else str(self.created_at),
+            "questions": [q.to_dict() for q in self.questions],
+        }
+
     def add_question(self, qtype: str, text: str, **kwargs):
         """Add a question to the exam."""
         # Normalize type string: handle mixed-case inputs from frontend
         qtype_normalized = qtype.strip().lower().replace(" ", "_")
-        meta = kwargs.pop("metadata", {})
-        for key in ("topic", "difficulty"):
-            if key in kwargs:
-                meta[key] = kwargs.pop(key)
-        if kwargs.get("reference_answer"):
-            meta["reference_answer"] = kwargs.pop("reference_answer")
-        if meta:
-            kwargs["metadata"] = meta
+        meta = dict(kwargs.pop("metadata", {}) or {})
+
+        options = kwargs.pop("options", None)
+        correct_answer = kwargs.pop("correct_answer", None)
+        marks = float(kwargs.pop("marks", 1.0))
+        keywords = kwargs.pop("keywords", []) or []
+        tolerance = kwargs.pop("tolerance", None)
+        rubric = kwargs.pop("rubric", None)
+        qid = kwargs.pop("id", kwargs.pop("question_id", f"q{len(self.questions) + 1}"))
+
+        # Map programming fields
+        tests = kwargs.pop("tests", kwargs.pop("test_cases", None))
+        if tests is not None:
+            meta["tests"] = tests
+        hidden_tests = kwargs.pop("hidden_tests", None)
+        if hidden_tests is not None:
+            meta["hidden_tests"] = hidden_tests
+        edge_cases = kwargs.pop("edge_cases", None)
+        if edge_cases is not None:
+            meta["edge_cases"] = edge_cases
+        func_name = kwargs.pop("function_name", kwargs.pop("target_function", kwargs.pop("entry_function_name", None)))
+        if func_name is not None:
+            meta["function_name"] = func_name
+        language = kwargs.pop("language", None)
+        if language is not None:
+            meta["language"] = language
+        starter_code = kwargs.pop("starter_code", None)
+        if starter_code is not None:
+            meta["starter_code"] = starter_code
+
+        # Map mathematical fields
+        formula = kwargs.pop("formula", kwargs.pop("formula_hint", kwargs.pop("governing_formula", None)))
+        if formula is not None:
+            meta["governing_formula"] = formula
+            meta["formula"] = formula
+        variables = kwargs.pop("variables", kwargs.pop("expected_variables", kwargs.pop("required_params", None)))
+        if variables is not None:
+            meta["variables"] = variables
+            meta["expected_variables"] = variables
+            meta["required_params"] = variables
+        units = kwargs.pop("units", kwargs.pop("expected_units", None))
+        if units is not None:
+            meta["units"] = units
+        final_value = kwargs.pop("final_value", kwargs.pop("expected_final_value", None))
+        if final_value is not None:
+            meta["final_value"] = final_value
+
+        # Map model / reference answer
+        model_answer = kwargs.pop("model_answer", kwargs.pop("reference_answer", None))
+        if model_answer is not None:
+            meta["model_answer"] = model_answer
+            meta["reference_answer"] = model_answer
+            if correct_answer is None:
+                correct_answer = model_answer
+
+        # Put any remaining kwargs into meta
+        for k, v in kwargs.items():
+            meta[k] = v
+
         q = Question(
-            id=f"q{len(self.questions) + 1}",
+            id=str(qid),
             type=QuestionType(qtype_normalized),
             text=text,
-            **kwargs
+            options=options,
+            correct_answer=correct_answer,
+            marks=marks,
+            keywords=keywords,
+            tolerance=tolerance,
+            rubric=rubric,
+            metadata=meta,
         )
         self.questions.append(q)
         return q

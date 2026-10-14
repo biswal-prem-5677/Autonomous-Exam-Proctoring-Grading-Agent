@@ -73,10 +73,15 @@ class GradingOrchestrator:
 
         # Build reference corpus for TF-IDF
         refs = []
-        if reference_answers:
-            refs = [reference_answers.get(q.id, q.text) for q in short_qs]
-        else:
-            refs = [q.text for q in short_qs]
+        for q in short_qs:
+            ref = None
+            if reference_answers and q.id in reference_answers:
+                ref = reference_answers[q.id]
+            elif q.correct_answer:
+                ref = str(q.correct_answer)
+            elif q.metadata:
+                ref = q.metadata.get("model_answer") or q.metadata.get("reference_answer")
+            refs.append(ref or "")
 
         self.tfidf_scorer.fit(refs)
 
@@ -90,10 +95,17 @@ class GradingOrchestrator:
                 student_ans = student_ans.get("answer", "")
             student_str = str(student_ans)
 
-            ref_answer = reference_answers.get(q.id, q.text) if reference_answers else q.text
+            ref_answer = None
+            if reference_answers and q.id in reference_answers:
+                ref_answer = reference_answers[q.id]
+            elif q.correct_answer:
+                ref_answer = str(q.correct_answer)
+            elif q.metadata:
+                ref_answer = q.metadata.get("model_answer") or q.metadata.get("reference_answer")
+            ref_answer = ref_answer or ""
 
             # TF-IDF cosine similarity against reference
-            cosine_sim = self.tfidf_scorer.cosine_similarity(student_str, ref_answer)
+            cosine_sim = self.tfidf_scorer.cosine_similarity(student_str, ref_answer) if ref_answer else 0.0
 
             # Keyword coverage
             kw_result = self.keyword_scorer.score(student_str, q.keywords)
@@ -147,7 +159,14 @@ class GradingOrchestrator:
                 student_ans = student_ans.get("answer", "")
             student_str = str(student_ans)
 
-            ref_answer = reference_answers.get(q.id, q.text) if reference_answers else q.text
+            ref_answer = None
+            if reference_answers and q.id in reference_answers:
+                ref_answer = reference_answers[q.id]
+            elif q.correct_answer:
+                ref_answer = str(q.correct_answer)
+            elif q.metadata:
+                ref_answer = q.metadata.get("model_answer") or q.metadata.get("reference_answer")
+            ref_answer = ref_answer or ""
 
             result = self.long_answer_grader.grade(
                 student_answer=student_str,
@@ -201,22 +220,25 @@ class GradingOrchestrator:
             else:
                 ref_dict = ref or {}
 
-            expected_formula = ref_dict.get("expected_formula", meta.get("governing_formula", meta.get("formula")))
-            required_params = ref_dict.get("required_params", meta.get("required_params", meta.get("parameters", [])))
-            derivation_steps = ref_dict.get("expected_derivation_steps", meta.get("expected_derivation_steps", 2))
+            expected_formula = ref_dict.get("expected_formula", meta.get("governing_formula", meta.get("formula", meta.get("formula_hint"))))
+            required_params = ref_dict.get("expected_variables", ref_dict.get("required_params", meta.get("expected_variables", meta.get("variables", meta.get("required_params")))))
+            if isinstance(required_params, list):
+                required_params = {p: 1.0 for p in required_params} if all(isinstance(x, str) for x in required_params) else None
+            elif not isinstance(required_params, dict):
+                required_params = None
+
             final_val = ref_dict.get("final_value", q.correct_answer if isinstance(q.correct_answer, (int, float)) else meta.get("final_value"))
             units = ref_dict.get("units", meta.get("units"))
             tolerance = q.tolerance if q.tolerance is not None else 0.02
 
             result = self.mathematical_grader.grade(
                 student_solution=student_str,
-                governing_formula=expected_formula,
-                required_parameters=required_params,
-                expected_derivation_steps=derivation_steps,
+                expected_formula=expected_formula,
+                expected_variables=required_params,
                 expected_final_value=final_val,
                 expected_units=units,
-                tolerance=tolerance,
                 marks=q.marks,
+                tolerance=tolerance,
             )
 
             per_question[q.id] = {
@@ -260,13 +282,30 @@ class GradingOrchestrator:
             student_str = str(student_code)
 
             meta = q.metadata or {}
-            func_name = meta.get("function_name", meta.get("target_function", "solution"))
-            tests = (test_suites.get(q.id) if test_suites else None) or meta.get("tests", [])
+            func_name = meta.get("function_name", meta.get("target_function", meta.get("entry_function_name", "solution")))
+            raw_tests = (test_suites.get(q.id) if test_suites else None) or meta.get("tests", meta.get("test_cases", []))
+            public_tests = []
+            hidden_tests = list(meta.get("hidden_tests", []))
+            edge_cases = list(meta.get("edge_cases", []))
+
+            if isinstance(raw_tests, list):
+                for t in raw_tests:
+                    if isinstance(t, dict):
+                        if t.get("is_hidden") or t.get("hidden"):
+                            hidden_tests.append(t)
+                        elif t.get("is_edge_case") or t.get("edge_case"):
+                            edge_cases.append(t)
+                        else:
+                            public_tests.append(t)
+                    else:
+                        public_tests.append(t)
 
             result = self.programming_grader.grade(
-                student_code=student_str,
-                target_function_name=func_name,
-                test_cases=tests,
+                code_str=student_str,
+                entry_function_name=func_name,
+                public_tests=public_tests,
+                hidden_tests=hidden_tests,
+                edge_cases=edge_cases,
                 marks=q.marks,
             )
 

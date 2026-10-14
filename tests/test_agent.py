@@ -202,7 +202,8 @@ class TestKeywordCoverageScorer:
     def test_no_keywords(self):
         scorer = KeywordCoverageScorer()
         r = scorer.score("some answer", [])
-        assert r["coverage"] == 1.0
+        # Empty keywords = 0.0 coverage (prevents blank answers scoring full marks)
+        assert r["coverage"] == 0.0
 
     def test_empty_answer(self):
         scorer = KeywordCoverageScorer()

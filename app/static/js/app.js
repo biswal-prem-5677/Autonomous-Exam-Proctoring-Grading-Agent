@@ -2,7 +2,7 @@
  * Autonomous Exam Proctoring & Grading Agent - Shared App JavaScript
  */
 
-const API_BASE = window.location.origin;
+window.API_BASE = window.API_BASE || '/api';
 
 const App = {
     currentUser: null,
@@ -103,7 +103,10 @@ const App = {
             m._idleTimer = setTimeout(() => { m.idleSeconds += 5; }, 5000);
         });
         document.addEventListener('click', () => { m.clicks++; });
-        document.addEventListener('contextmenu', () => { m.rightClicks++; });
+        document.addEventListener('contextmenu', () => {
+            m.rightClicks++;
+            App.logBrowserEvent('contextmenu');
+        });
     },
 
     getMouseStats() {
@@ -126,28 +129,244 @@ const App = {
         };
     },
 
+    // ─── Audio Analysis via Web Audio ─────────────────────────────────────────
+
+    _audio: {
+        audioContext: null,
+        analyser: null,
+        stream: null,
+        active: false,
+    },
+
+    async initAudioCapture(stream) {
+        try {
+            const audioStream = stream || await navigator.mediaDevices.getUserMedia({ audio: true });
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            const ctx = new AudioContextClass();
+            const source = ctx.createMediaStreamSource(audioStream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 512;
+            source.connect(analyser);
+
+            this._audio.audioContext = ctx;
+            this._audio.analyser = analyser;
+            this._audio.stream = audioStream;
+            this._audio.active = true;
+            return true;
+        } catch (e) {
+            console.warn('Audio capture not available:', e);
+            this._audio.active = false;
+            return false;
+        }
+    },
+
+    getAudioStats() {
+        if (!this._audio.active || !this._audio.analyser) {
+            return {
+                rms_energy: 0.0,
+                volume_db: -100.0,
+                zero_crossing_rate: 0.0,
+                spectral_centroid: 0.0,
+                speech_detected: false,
+            };
+        }
+        const analyser = this._audio.analyser;
+        const timeData = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(timeData);
+
+        const freqData = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(freqData);
+
+        let sumSq = 0;
+        let zcrCount = 0;
+        for (let i = 0; i < timeData.length; i++) {
+            const norm = (timeData[i] - 128) / 128;
+            sumSq += norm * norm;
+            if (i > 0) {
+                const prevNorm = (timeData[i - 1] - 128) / 128;
+                if ((norm >= 0 && prevNorm < 0) || (norm < 0 && prevNorm >= 0)) {
+                    zcrCount++;
+                }
+            }
+        }
+        const rms = Math.sqrt(sumSq / timeData.length);
+        const db = rms > 0.00001 ? 20 * Math.log10(rms) : -100.0;
+        const zcr = zcrCount / timeData.length;
+
+        let num = 0;
+        let den = 0;
+        for (let k = 0; k < freqData.length; k++) {
+            num += k * freqData[k];
+            den += freqData[k];
+        }
+        const sampleRate = analyser.context.sampleRate || 44100;
+        const centroid = den > 0 ? (num / den) * (sampleRate / analyser.fftSize) : 0;
+
+        return {
+            rms_energy: Math.round(rms * 1000) / 1000,
+            volume_db: Math.round(db * 10) / 10,
+            zero_crossing_rate: Math.round(zcr * 1000) / 1000,
+            spectral_centroid: Math.round(centroid * 10) / 10,
+            speech_detected: db > -40.0 && rms > 0.04,
+        };
+    },
+
+    // ─── Browser Events with Per-Interval Deltas ──────────────────────────────
+
+    browserEvents: [],
+    _deltas: {
+        tab_switch: 0,
+        fullscreen_exit: 0,
+        paste: 0,
+        copy: 0,
+        cut: 0,
+        contextmenu: 0,
+        window_blur: 0,
+    },
+    sessionStartTime: Date.now(),
+
+    logBrowserEvent(type) {
+        this.browserEvents.push({ type, timestamp: Date.now() });
+        if (this._deltas[type] !== undefined) {
+            this._deltas[type]++;
+        }
+    },
+
+    getBrowserStats(resetDelta = true) {
+        const t0 = (this.examSession && this.examSession.startTime) ? this.examSession.startTime : this.sessionStartTime;
+        const elapsed = (Date.now() - t0) / 1000;
+
+        const stats = {
+            tab_switches:       this.browserEvents.filter(e => e.type === 'tab_switch').length,
+            window_blurs:       this.browserEvents.filter(e => e.type === 'window_blur').length,
+            fullscreen_exits:   this.browserEvents.filter(e => e.type === 'fullscreen_exit').length,
+            visibility_changes: this.browserEvents.filter(e => e.type === 'visibility_change').length,
+            pastes:             this.browserEvents.filter(e => e.type === 'paste').length,
+            copies:             this.browserEvents.filter(e => e.type === 'copy').length,
+            cuts:               this.browserEvents.filter(e => e.type === 'cut').length,
+            context_menus:      this.browserEvents.filter(e => e.type === 'contextmenu').length,
+
+            // Per-interval deltas to prevent repetitive alert firing
+            delta_tab_switches:     this._deltas.tab_switch,
+            delta_fullscreen_exits: this._deltas.fullscreen_exit,
+            delta_pastes:           this._deltas.paste,
+            delta_copies:           this._deltas.copy,
+            delta_cuts:             this._deltas.cut,
+            delta_window_blurs:     this._deltas.window_blur,
+            session_elapsed:        elapsed,
+        };
+
+        if (resetDelta) {
+            this._deltas = {
+                tab_switch: 0,
+                fullscreen_exit: 0,
+                paste: 0,
+                copy: 0,
+                cut: 0,
+                contextmenu: 0,
+                window_blur: 0,
+            };
+        }
+
+        return stats;
+    },
+
+    // ─── Lifecycle & Auth ─────────────────────────────────────────────────────
+
     init() {
         this.authToken = localStorage.getItem('token');
         this.currentUser = this.getUserFromStorage();
-        const publicPages = ['/', '/login', '/register'];
-        const path = window.location.pathname;
-        if (!this.authToken && !publicPages.some(p => path.startsWith(p))) {
-            window.location.href = '/login';
-            return;
-        }
-        if (this.authToken) { this.startPolling(); }
+
+        // Listeners for copy, cut, paste, tab switch, fullscreen
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden && this.currentPage === 'exam') { this.logBrowserEvent('tab_switch'); }
+            if (document.hidden) {
+                App.logBrowserEvent('tab_switch');
+            }
         });
         document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement && this.currentPage === 'exam') { this.logBrowserEvent('fullscreen_exit'); }
+            if (!document.fullscreenElement) {
+                App.logBrowserEvent('fullscreen_exit');
+            }
         });
         window.addEventListener('blur', () => {
-            if (this.currentPage === 'exam') { this.logBrowserEvent('window_blur'); }
+            App.logBrowserEvent('window_blur');
+        });
+        document.addEventListener('copy', () => {
+            App.logBrowserEvent('copy');
+        });
+        document.addEventListener('cut', () => {
+            App.logBrowserEvent('cut');
+        });
+        document.addEventListener('paste', () => {
+            App.logBrowserEvent('paste');
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.currentPage === 'exam') { this.logBrowserEvent('fullscreen_exit'); }
+            if (e.key === 'Escape') {
+                App.logBrowserEvent('fullscreen_exit');
+            }
         });
+
+        this.renderNavbar();
+    },
+
+    renderNavbar() {
+        const navEl = document.getElementById('main-nav-links');
+        const userEl = document.getElementById('nav-user-info');
+        if (!navEl) return;
+
+        const role = this.currentUser?.role || 'guest';
+        let links = [];
+
+        if (!this.authToken) {
+            links = [
+                { href: '/', label: 'Home' },
+                { href: '/login', label: 'Login' },
+                { href: '/register', label: 'Register' },
+            ];
+        } else if (role === 'student') {
+            links = [
+                { href: '/dashboard', label: 'Dashboard' },
+                { href: '/student/exam', label: 'Take Exam' },
+                { href: '/student/results', label: 'Results' },
+            ];
+        } else if (role === 'examiner') {
+            links = [
+                { href: '/examiner/dashboard', label: 'Dashboard' },
+                { href: '/examiner/create-exam', label: 'Create Exam' },
+                { href: '/examiner/grading', label: 'Grading' },
+                { href: '/monitor', label: 'Live Monitor' },
+                { href: '/analytics', label: 'Analytics' },
+                { href: '/training', label: 'ML Models' },
+            ];
+        } else if (role === 'admin' || role === 'super_admin') {
+            links = [
+                { href: '/dashboard', label: 'Dashboard' },
+                { href: '/examiner/dashboard', label: 'Examiner View' },
+                { href: '/examiner/create-exam', label: 'Exam Builder' },
+                { href: '/examiner/grading', label: 'Grading' },
+                { href: '/monitor', label: 'Monitor' },
+                { href: '/analytics', label: 'Analytics' },
+                { href: '/training', label: 'ML Training' },
+            ];
+        }
+
+        navEl.innerHTML = links.map(l =>
+            `<a href="${l.href}" class="nav-link ${window.location.pathname === l.href ? 'active' : ''}">${l.label}</a>`
+        ).join('');
+
+        if (userEl) {
+            if (this.authToken && this.currentUser) {
+                userEl.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span class="user-badge role-${role}">${role.toUpperCase()}</span>
+                        <span style="font-weight:600;font-size:13px;">${this.currentUser.full_name || this.currentUser.username || ''}</span>
+                        <button onclick="App.logout()" class="btn btn-sm btn-secondary" style="margin-left:8px;">Logout</button>
+                    </div>
+                `;
+            } else {
+                userEl.innerHTML = `<a href="/login" class="btn btn-sm btn-primary">Sign In</a>`;
+            }
+        }
     },
 
     getUserFromStorage() {
@@ -157,11 +376,19 @@ const App = {
     isAuthenticated() { return !!this.authToken; },
 
     getHeaders() {
-        return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.authToken}` };
+        const h = { 'Content-Type': 'application/json' };
+        if (this.authToken) {
+            h['Authorization'] = `Bearer ${this.authToken}`;
+        }
+        return h;
     },
 
     async api(url, options = {}) {
-        const res = await fetch(`${API_BASE}${url}`, { ...options, headers: { ...this.getHeaders(), ...options.headers } });
+        const fullUrl = url.startsWith('http') ? url : (url.startsWith('/api') ? url : `/api${url}`);
+        const res = await fetch(fullUrl, {
+            ...options,
+            headers: { ...this.getHeaders(), ...(options.headers || {}) },
+        });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ error: 'Request failed' }));
             throw new Error(err.error || err.detail || `HTTP ${res.status}`);
@@ -175,71 +402,56 @@ const App = {
     async apiDelete(url)      { return this.api(url, { method: 'DELETE' }); },
 
     async login(username, password) {
-        const res = await fetch(`${API_BASE}/api/auth/login`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
         });
-        if (!res.ok) { const err = await res.json().catch(() => ({ error: 'Login failed' })); throw new Error(err.error); }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Login failed' }));
+            throw new Error(err.error || 'Invalid credentials');
+        }
         const data = await res.json();
         this.setAuth(data.token, data.user);
         return data;
     },
 
     async register(userData) {
-        const res = await fetch(`${API_BASE}/api/auth/register`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(userData),
         });
-        if (!res.ok) { const err = await res.json().catch(() => ({ error: 'Registration failed' })); throw new Error(err.error); }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Registration failed' }));
+            throw new Error(err.error || 'Registration failed');
+        }
         const data = await res.json();
         this.setAuth(data.token, data.user);
         return data;
     },
 
     setAuth(token, user) {
-        this.authToken = token; this.currentUser = user;
-        localStorage.setItem('token', token); localStorage.setItem('user', JSON.stringify(user));
+        this.authToken = token;
+        this.currentUser = user;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
     },
 
     logout() {
-        this.authToken = null; this.currentUser = null;
-        localStorage.removeItem('token'); localStorage.removeItem('user');
+        this.authToken = null;
+        this.currentUser = null;
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
         this.stopPolling();
         window.location.href = '/login';
     },
 
     getUserRole() { return this.currentUser?.role || 'student'; },
 
-    navigate(page) {
-        this.currentPage = page;
-        document.querySelectorAll('.nav-item').forEach(el => { el.classList.toggle('active', el.dataset.page === page); });
-    },
-
     startPolling() { this.stopPolling(); this.pollingInterval = setInterval(() => this.pollUpdates(), 5000); },
     stopPolling()  { if (this.pollingInterval) { clearInterval(this.pollingInterval); this.pollingInterval = null; } },
-    async pollUpdates() { /* Silent polling for dashboard data */ },
-
-    browserEvents: [],
-    sessionStartTime: Date.now(),
-
-    logBrowserEvent(type) { this.browserEvents.push({ type, timestamp: Date.now() }); },
-
-    getBrowserStats() {
-        const t0 = (this.examSession && this.examSession.startTime) ? this.examSession.startTime : this.sessionStartTime;
-        const elapsed = (Date.now() - t0) / 1000;
-        return {
-            tab_switches:      this.browserEvents.filter(e => e.type === 'tab_switch').length,
-            window_blurs:      this.browserEvents.filter(e => e.type === 'window_blur').length,
-            fullscreen_exits:  this.browserEvents.filter(e => e.type === 'fullscreen_exit').length,
-            visibility_changes:this.browserEvents.filter(e => e.type === 'visibility_change').length,
-            session_elapsed:   elapsed,
-        };
-    },
-
-    async runPreflight(checks) {
-        try { return await this.apiPost('/api/preflight', checks); }
-        catch (e) { return { checks, can_proceed: false, error: e.message }; }
-    },
+    async pollUpdates() { /* Polling hook */ },
 
     async startExamSession(studentId, examId) {
         let serverSession = null;
@@ -249,7 +461,7 @@ const App = {
                 exam_id: examId,
             });
         } catch (e) {
-            console.warn('Server session creation failed, proceeding with local session:', e);
+            console.warn('Server session creation notice:', e.message);
         }
 
         const sessionKey = (serverSession && serverSession.session_key)
@@ -259,7 +471,7 @@ const App = {
         this.examSession = {
             studentId,
             examId,
-            sessionId: serverSession?.session_id || 'local_session',
+            sessionId: serverSession?.session_id || 'session_' + Math.random().toString(36).substring(2, 9),
             session_key: sessionKey,
             startTime: Date.now(),
             answers: {},
@@ -269,7 +481,11 @@ const App = {
         return this.examSession;
     },
 
-    submitAnswer(questionId, answer) { if (this.examSession) { this.examSession.answers[questionId] = answer; } },
+    submitAnswer(questionId, answer) {
+        if (this.examSession) {
+            this.examSession.answers[questionId] = answer;
+        }
+    },
 
     getExamElapsed() {
         if (!this.examSession) return 0;
@@ -278,3 +494,4 @@ const App = {
 };
 
 document.addEventListener('DOMContentLoaded', () => App.init());
+window.App = App;

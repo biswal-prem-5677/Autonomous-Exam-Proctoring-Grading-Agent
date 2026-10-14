@@ -118,6 +118,37 @@
         </main>
     </div>
 
+    <!-- Grade Override Modal -->
+    <div id="override-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+        <div class="card" style="max-width:480px;width:90%;margin:20px;">
+            <div class="card-header">
+                <div class="card-title">&#x270F;&#xFE0F; Manual Grade Override</div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="font-size:13px;color:var(--text-muted);display:block;margin-bottom:4px;">Question</label>
+                <input type="text" id="override-qid" class="form-input" disabled style="background:var(--bg-secondary);">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div>
+                    <label style="font-size:13px;color:var(--text-muted);display:block;margin-bottom:4px;">Original Score</label>
+                    <input type="text" id="override-orig-score" class="form-input" disabled style="background:var(--bg-secondary);">
+                </div>
+                <div>
+                    <label style="font-size:13px;color:var(--text-muted);display:block;margin-bottom:4px;">New Score *</label>
+                    <input type="number" id="override-new-score" class="form-input" step="any" min="0">
+                </div>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="font-size:13px;color:var(--text-muted);display:block;margin-bottom:4px;">Reason for Override *</label>
+                <textarea id="override-reason" class="form-textarea" placeholder="Explain rationale for this score adjustment..." style="min-height:80px;"></textarea>
+            </div>
+            <div class="form-actions" style="justify-content:flex-end;display:flex;gap:10px;">
+                <button class="btn btn-secondary" onclick="closeOverrideModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitGradeOverride()">Save Override</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/app.js"></script>
     <script>
     let currentGradingSession = null;
@@ -220,8 +251,9 @@
                         <strong>Answer:</strong> ${escapeHtml(q.student_answer || '(not answered)')}<br>
                         ${q.correct_answer ? `<strong>Correct:</strong> ${escapeHtml(q.correct_answer)}` : ''}
                     </div>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">
-                        Method: ${q.grading_method || 'auto'} | ${q.cosine_similarity ? `Similarity: ${Math.round((q.cosine_similarity||0)*100)}%` : ''} ${q.keyword_coverage ? `| Coverage: ${Math.round((q.keyword_coverage||0)*100)}%` : ''}
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:6px;display:flex;justify-content:space-between;align-items:center;">
+                        <span>Method: ${q.grading_method || 'auto'} | ${q.cosine_similarity ? `Similarity: ${Math.round((q.cosine_similarity||0)*100)}%` : ''} ${q.keyword_coverage ? `| Coverage: ${Math.round((q.keyword_coverage||0)*100)}%` : ''}</span>
+                        <button class="btn btn-sm btn-secondary" onclick="openOverrideModal('${qid}', ${q.score}, ${q.max_score})">&#x270F;&#xFE0F; Override Score</button>
                     </div>
                     ${detailsHtml}
                 </div>`;
@@ -231,6 +263,58 @@
             document.getElementById('grading-detail').scrollIntoView({ behavior: 'smooth' });
         } catch (e) {
             alert('Failed to load submission: ' + e.message);
+        }
+    }
+
+    let activeOverrideQuestion = null;
+
+    function openOverrideModal(qid, origScore, maxScore) {
+        activeOverrideQuestion = qid;
+        document.getElementById('override-qid').value = qid;
+        document.getElementById('override-orig-score').value = origScore;
+        document.getElementById('override-new-score').value = origScore;
+        document.getElementById('override-new-score').max = maxScore;
+        document.getElementById('override-reason').value = '';
+        document.getElementById('override-modal').style.display = 'flex';
+    }
+
+    function closeOverrideModal() {
+        document.getElementById('override-modal').style.display = 'none';
+        activeOverrideQuestion = null;
+    }
+
+    async function submitGradeOverride() {
+        if (!currentGradingSession || !activeOverrideQuestion) return;
+        const newScore = parseFloat(document.getElementById('override-new-score').value);
+        const reason = document.getElementById('override-reason').value.trim();
+        const origScore = parseFloat(document.getElementById('override-orig-score').value) || 0.0;
+
+        if (isNaN(newScore)) {
+            alert('Please enter a valid numeric score');
+            return;
+        }
+        if (!reason) {
+            alert('Please provide a reason for the override');
+            return;
+        }
+
+        try {
+            const sid = currentGradingSession.session_id || currentGradingSession.student_id;
+            await App.apiPost('/api/grading/override', {
+                session_id: sid,
+                submission_id: sid,
+                question_id: activeOverrideQuestion,
+                original_score: origScore,
+                override_score: newScore,
+                reason: reason,
+                examiner_id: App.currentUser?.username || 'examiner',
+            });
+            closeOverrideModal();
+            alert('Grade override recorded successfully!');
+            // Refresh view
+            await viewSubmission(currentGradingSession.student_id, currentGradingSession.exam_id);
+        } catch (e) {
+            alert('Override failed: ' + e.message);
         }
     }
 

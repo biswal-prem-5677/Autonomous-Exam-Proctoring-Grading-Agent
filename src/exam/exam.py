@@ -2,8 +2,8 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional, List, Any
-from src.models.models import Exam, ExamSession, AgentState, ProctoringEvent
+from typing import Optional, List, Any, Dict
+from src.models.models import Exam, ExamSession, AgentState, ProctoringEvent, Question
 from src.exam.session import ExamSessionManager
 from src.exam.questions import QuestionBank
 from src.agent.risk import RiskEngine
@@ -46,7 +46,7 @@ class ExamController:
             self.session_manager.start()
 
     def record_proctoring_event(self, event_type: str, confidence: float,
-                                details: dict = None) -> None:
+                                details: Optional[Dict[str, Any]] = None) -> None:
         """Record a proctoring event and update risk score."""
         event = ProctoringEvent(
             timestamp=datetime.now(),
@@ -58,17 +58,21 @@ class ExamController:
         if self.session_manager:
             self.session_manager.add_event(event)
 
-        self.evidence_memory.add_event(event)
-
-        # Update risk score
-        risk_score = self.risk_engine.compute_risk(
-            self.evidence_memory.get_recent_events()
+        # EvidenceMemory.add_event takes (event_type: str, confidence: float)
+        self.evidence_memory.add_event(
+            event_type=event.event_type,
+            confidence=event.confidence,
         )
-        self.session.risk_score = risk_score
+
+        # Update risk score — compute_risk takes EvidenceMemory directly
+        risk_score = self.risk_engine.compute_risk(self.evidence_memory)
+        if self.session is not None:
+            self.session.risk_score = risk_score
 
         # Update agent state based on risk
         new_state = self._determine_state(risk_score)
-        self.session.state = new_state
+        if self.session is not None:
+            self.session.state = new_state
         if self.session_manager:
             self.session_manager.set_state(new_state)
 
@@ -86,7 +90,7 @@ class ExamController:
         if self.session_manager:
             self.session_manager.submit_answer(question_id, answer)
 
-    def end_exam(self) -> ExamSession:
+    def end_exam(self) -> Optional[ExamSession]:
         """End the exam session."""
         if self.session_manager:
             self.session_manager.stop()
@@ -115,35 +119,139 @@ class ExamController:
         }
 
 
+def _exam_from_dict(d: dict) -> Exam:
+    from src.models.models import QuestionType
+    questions = []
+    for qd in d.get("questions", []):
+        qtype_str = qd.get("type", "mcq")
+        if hasattr(qtype_str, "value"):
+            qtype_str = qtype_str.value
+        try:
+            qtype = QuestionType(str(qtype_str).lower())
+        except Exception:
+            qtype = QuestionType.MCQ
+        q = Question(
+            id=qd.get("id") or str(uuid.uuid4())[:8],
+            type=qtype,
+            text=qd.get("text", ""),
+            options=qd.get("options"),
+            correct_answer=qd.get("correct_answer"),
+            marks=float(qd.get("marks", 1.0)),
+            keywords=qd.get("keywords") or [],
+            tolerance=float(qd["tolerance"]) if qd.get("tolerance") is not None else None,
+            rubric=qd.get("rubric"),
+            metadata=qd.get("metadata") or {},
+        )
+        questions.append(q)
+    return Exam(
+        exam_id=str(d.get("exam_id") or d.get("id") or ""),
+        title=d.get("title", "Untitled Exam"),
+        duration_minutes=int(d.get("duration_minutes", 60)),
+        questions=questions,
+        topic=d.get("topic", ""),
+        difficulty=d.get("difficulty", "medium"),
+        instructions=d.get("instructions", ""),
+        passing_score=float(d.get("passing_score", 40.0)),
+        is_released=bool(d.get("is_released", False)),
+        settings=d.get("settings") or {},
+    )
+
+
 class ExamManager:
     """High-level exam manager for frontend - wraps ExamController for UI convenience."""
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, db=None):
         self.config = config or {}
+        self._db = db
         self._controllers: dict[str, ExamController] = {}
         self._exams: dict[str, Exam] = {}
+        self._load_from_db()
+
+    def _get_db(self):
+        if self._db is None:
+            try:
+                from src.database.db import Database, DB_PATH
+                self._db = Database(DB_PATH)
+            except Exception:
+                pass
+        return self._db
+
+    def _load_from_db(self) -> None:
+        db = self._get_db()
+        if not db:
+            return
+        try:
+            rows = db.list_exams()
+            for r in rows:
+                exam = _exam_from_dict(r)
+                self._exams[exam.exam_id] = exam
+        except Exception:
+            pass
 
     def get_exam(self, exam_id: Optional[str]) -> Optional[Exam]:
         """Get an exam by ID."""
         if not exam_id:
             return None
-        return self._exams.get(exam_id)
+        if exam_id in self._exams:
+            return self._exams[exam_id]
+        db = self._get_db()
+        if db:
+            try:
+                r = db.get_exam(exam_id)
+                if r:
+                    exam = _exam_from_dict(r)
+                    self._exams[exam.exam_id] = exam
+                    return exam
+            except Exception:
+                pass
+        return None
 
     def list_exams(self) -> List[Exam]:
         """List all exams."""
+        db = self._get_db()
+        if db:
+            try:
+                rows = db.list_exams()
+                for r in rows:
+                    exam = _exam_from_dict(r)
+                    self._exams[exam.exam_id] = exam
+            except Exception:
+                pass
         return list(self._exams.values())
 
     def create_exam(self, exam_id: str, title: str, duration_minutes: int,
-                    questions: list) -> Exam:
-        """Create a new exam."""
+                    questions: list, instructions: str = "", passing_score: float = 40.0,
+                    topic: str = "", difficulty: str = "medium", settings: Optional[Dict[str, Any]] = None) -> Exam:
+        """Create a new exam and persist to DB."""
         exam = Exam(
             exam_id=exam_id,
             title=title,
             duration_minutes=duration_minutes,
             questions=questions,
+            instructions=instructions,
+            passing_score=passing_score,
+            topic=topic,
+            difficulty=difficulty,
+            settings=settings or {},
         )
         self._exams[exam_id] = exam
+        db = self._get_db()
+        if db:
+            try:
+                db.save_exam(exam.to_dict())
+            except Exception:
+                pass
         return exam
+
+    def add_exam(self, exam: Exam) -> None:
+        """Store exam and persist."""
+        self._exams[exam.exam_id] = exam
+        db = self._get_db()
+        if db:
+            try:
+                db.save_exam(exam.to_dict())
+            except Exception:
+                pass
 
     def get_or_create_controller(self, student_id: str, exam_id: str,
                                   duration_minutes: int = 60) -> ExamController:

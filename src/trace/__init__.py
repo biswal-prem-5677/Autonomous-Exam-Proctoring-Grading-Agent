@@ -432,12 +432,16 @@ def build_explainability_trace(
     decision = _state_decision_map.get(agent_state, DecisionOutcome.REVIEW_REQUIRED)
 
     # ── Corroboration with REAL event timestamps ──
-    from src.fusion import CorroborationSignal, compute_corroboration
+    from src.fusion import CorroborationSignal, compute_corroboration, ModalitySource
     corrob_signals = []
     events_without_timestamp = []
     for evt in events:
         evt_type = evt.get("type", "")
-        modality = MODALITY_MAP.get(evt_type, "vision")
+        raw_mod = MODALITY_MAP.get(evt_type, "vision")
+        try:
+            modality = ModalitySource(raw_mod.lower())
+        except Exception:
+            modality = ModalitySource.VISION
         weight = risk_engine.EVENT_WEIGHTS.get(evt_type, 0.1) if hasattr(risk_engine, 'EVENT_WEIGHTS') else 0.1
 
         # Use REAL timestamp from event payload if present.

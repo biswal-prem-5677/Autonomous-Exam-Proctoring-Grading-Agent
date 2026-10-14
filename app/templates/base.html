@@ -11,12 +11,110 @@
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+    <style>
+        .app-topbar {
+            background: #ffffff;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: var(--shadow-sm);
+        }
+        .topbar-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 24px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+        .brand-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 1.15rem;
+        }
+        .brand-badge {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            background: var(--accent);
+            color: #fff;
+            border-radius: 4px;
+            letter-spacing: 0.05em;
+        }
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow-x: auto;
+        }
+        .nav-link {
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: var(--radius-sm, 6px);
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .nav-link:hover {
+            color: var(--accent);
+            background: var(--bg-hover);
+        }
+        .nav-link.active {
+            color: var(--accent);
+            background: var(--bg-secondary);
+            font-weight: 600;
+        }
+        .nav-user {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            letter-spacing: 0.04em;
+        }
+        .user-badge.role-student { background: #e0f2fe; color: #0369a1; }
+        .user-badge.role-examiner { background: #fef3c7; color: #b45309; }
+        .user-badge.role-admin, .user-badge.role-super_admin { background: #fee2e2; color: #b91c1c; }
+        .user-badge.role-guest { background: #f1f5f9; color: #64748b; }
+    </style>
     {% block styles %}{% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    {% block content %}{% endblock %}
-    {% block body %}{% endblock %}
+    {% block navbar %}
+    <header class="app-topbar">
+        <div class="topbar-inner">
+            <a href="/" class="brand-link">
+                <span>🎓</span>
+                <span>ExamAI <span class="brand-badge">Agent</span></span>
+            </a>
+            <nav id="main-nav-links" class="nav-links">
+                <a href="/dashboard" class="nav-link">Dashboard</a>
+            </nav>
+            <div id="nav-user-info" class="nav-user">
+                <!-- Dynamically populated by app.js -->
+            </div>
+        </div>
+    </header>
+    {% endblock %}
+
+    <main class="app-main-content">
+        {% block content %}{% endblock %}
+        {% block body %}{% endblock %}
+    </main>
 
     <script src="/static/js/api.js"></script>
     <script src="/static/js/utils.js"></script>
@@ -30,13 +128,19 @@
                 var el = document.getElementById("app-bootstrap-data");
                 if (el && el.textContent) {
                     var data = JSON.parse(el.textContent);
-                    App.currentUser = data.currentUser || {};
-                    App.authToken = data.authToken || "";
+                    if (data.currentUser && Object.keys(data.currentUser).length > 0) {
+                        App.currentUser = data.currentUser;
+                        localStorage.setItem('user', JSON.stringify(data.currentUser));
+                    }
+                    if (data.authToken) {
+                        App.authToken = data.authToken;
+                        localStorage.setItem('token', data.authToken);
+                    }
                 }
             } catch (e) {
-                App.currentUser = {};
-                App.authToken = "";
+                console.warn('Bootstrap parse notice:', e);
             }
+            App.renderNavbar();
         })();
     </script>
     {% block scripts %}{% endblock %}

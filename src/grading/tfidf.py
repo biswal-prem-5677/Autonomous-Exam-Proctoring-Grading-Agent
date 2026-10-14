@@ -113,11 +113,11 @@ class KeywordCoverageScorer:
         keywords = keywords or []
         if not keywords:
             return {
-                "coverage": 1.0,
+                "coverage": 0.0,
                 "matched": [],
                 "found": [],
                 "missing": [],
-                "score": 1.0,
+                "score": 0.0,
                 "total_keywords": 0,
                 "matched_count": 0,
             }

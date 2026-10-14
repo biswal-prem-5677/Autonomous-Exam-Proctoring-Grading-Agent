@@ -39,6 +39,13 @@ class CorroborationSignal:
     duration: float = 0.0
     details: Dict = field(default_factory=dict)
 
+    def __post_init__(self):
+        if isinstance(self.modality, str):
+            try:
+                self.modality = ModalitySource(self.modality.lower())
+            except ValueError:
+                pass
+
 
 @dataclass
 class ContradictionRecord:
@@ -250,8 +257,9 @@ def _find_temporal_groups(signals, window):
 
 
 def _signal_to_dict(sig):
+    mod_val = sig.modality.value if hasattr(sig.modality, "value") else str(sig.modality)
     return {
-        "modality": sig.modality.value,
+        "modality": mod_val,
         "event_type": sig.event_type,
         "severity": round(sig.severity, 3),
         "confidence": round(sig.confidence, 3),
@@ -262,7 +270,7 @@ def _signal_to_dict(sig):
 
 
 def _explain(label, independent, total, modalities, uncorrelated, window, contradictions=None):
-    mod_names = ", ".join(sorted(m.value for m in modalities))
+    mod_names = ", ".join(sorted(m.value if hasattr(m, "value") else str(m) for m in modalities))
     uncorr_count = len(uncorrelated)
     contra_note = ""
     if contradictions:

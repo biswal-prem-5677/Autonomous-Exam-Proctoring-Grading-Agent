@@ -58,87 +58,28 @@
             <div class="main-content" style="margin-left:0;">
                 <!-- Exam Header Bar -->
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;flex-wrap:wrap;gap:12px;">
-                    <div>
-                        <span style="font-weight:600;" id="active-exam-title">Exam</span>
-                        <span class="status-badge success ml-1" style="margin-left:8px;"><span class="status-dot pulse"></span>Live</span>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-weight:700;font-size:16px;" id="active-exam-title">Exam</span>
+                        <span class="status-badge success"><span class="status-dot pulse"></span>Secure Session</span>
+                        <span id="autosave-status" style="font-size:12px;color:var(--success);font-weight:500;">&#x2714; Saved</span>
                     </div>
                     <div style="display:flex;gap:16px;align-items:center;">
-                        <span style="font-size:13px;color:var(--text-secondary);">&#x1F552; <span id="exam-timer">00:00</span></span>
-                        <span style="font-size:13px;color:var(--text-secondary);">Question <span id="q-current">1</span>/<span id="q-total">0</span></span>
-                        <span style="font-size:13px;color:var(--text-secondary);">&#x1F30D; Risk: <span id="live-risk">0%</span></span>
-                        <button class="btn btn-danger btn-sm" onclick="confirmSubmit()">&#x1F4E4; Submit</button>
+                        <span style="font-size:13px;color:var(--text-secondary);font-weight:600;">&#x23F1; Remaining: <span id="exam-timer" style="font-family:var(--font-mono, monospace);font-size:14px;color:var(--text-primary);">00:00</span></span>
+                        <span style="font-size:13px;color:var(--text-secondary);">Question <span id="q-current" style="font-weight:600;">1</span>/<span id="q-total" style="font-weight:600;">0</span></span>
+                        <button class="btn btn-danger btn-sm" onclick="confirmSubmit()">&#x1F4E4; Submit Exam</button>
                     </div>
                 </div>
 
-                <!-- Risk Meter -->
-                <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 20px;margin-bottom:16px;">
-                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
-                        <span style="color:var(--text-secondary);">Proctoring Risk Level</span>
-                        <span id="risk-label" style="font-weight:600;color:var(--success);">Low</span>
+                <!-- Non-intrusive Proctoring Status Bar -->
+                <div style="display:flex;gap:16px;align-items:center;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 16px;margin-bottom:16px;flex-wrap:wrap;">
+                    <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);">
+                        <span class="status-badge success" id="cam-status" style="font-size:11px;"><span class="status-dot"></span>Camera Active</span>
+                        <span class="status-badge success" id="env-status" style="font-size:11px;"><span class="status-dot"></span>Monitoring Engaged</span>
                     </div>
-                    <div class="risk-meter">
-                        <div class="risk-fill low" id="risk-bar" style="width:0%"></div>
-                    </div>
-                </div>
-
-                <!-- Proctoring Feed -->
-                <div class="grid-2" style="margin-bottom:16px;">
-                    <div class="card">
-                        <div class="card-header">
-                            <div class="card-title">&#x1F4F8; Camera Feed</div>
-                            <span class="status-badge success" id="cam-status"><span class="status-dot"></span>Active</span>
-                        </div>
-                        <video id="exam-webcam" autoplay playsinline muted
-                            style="width:100%;border-radius:var(--radius);background:#000;min-height:200px;"></video>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <div class="card-title">&#x1F514; Detection Log</div>
-                            <span class="status-badge neutral" id="event-count">0 events</span>
-                        </div>
-                        <div id="event-log" style="max-height:250px;overflow-y:auto;">
-                            <div class="empty-state" style="padding:30px 20px;"><p style="font-size:13px;">Monitoring active...</p></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Agent Risk Analysis Panel -->
-                <div class="card mt-2" id="risk-analysis-panel" style="display:none;">
-                    <div class="card-header">
-                        <div class="card-title">&#x1F9E0; Integrity Analysis</div>
-                        <span class="status-badge neutral" id="agent-state-badge">NORMAL</span>
-                    </div>
-                    <div class="grid-3 mt-1" style="gap:16px;">
-                        <!-- Risk Score -->
-                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:14px;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;">Risk Score</div>
-                            <div style="font-size:28px;font-weight:800;" id="trace-risk-score">0<span style="font-size:14px;font-weight:400;color:var(--text-muted);">/100</span></div>
-                            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Previous: <span id="trace-prev-risk">0</span></div>
-                        </div>
-                        <!-- Confidence -->
-                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:14px;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;">Confidence</div>
-                            <div style="font-size:28px;font-weight:800;" id="trace-confidence">--<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span></div>
-                            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Corroboration: <span id="trace-corroboration">0</span> modalities</div>
-                        </div>
-                        <!-- Agent State -->
-                        <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:14px;">
-                            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;">Agent Decision</div>
-                            <div style="font-size:20px;font-weight:700;" id="trace-decision">NORMAL</div>
-                            <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Uncertainty: <span id="trace-uncertainty">LOW</span></div>
-                        </div>
-                    </div>
-
-                    <!-- Evidence Contributions -->
-                    <div id="trace-contributions" style="margin-top:14px;display:none;">
-                        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Evidence Contributions</div>
-                        <div id="contributions-list"></div>
-                    </div>
-
-                    <!-- Corroboration Timeline -->
-                    <div id="trace-corrob" style="margin-top:14px;display:none;">
-                        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Cross-Modal Corroboration</div>
-                        <div id="corrob-timeline" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+                    <div style="flex:1;"></div>
+                    <div style="font-size:12px;color:var(--text-muted);">
+                        <span>Webcam self-preview: </span>
+                        <video id="exam-webcam" autoplay playsinline muted style="width:70px;height:48px;border-radius:4px;vertical-align:middle;object-fit:cover;border:1px solid var(--border);background:#000;display:inline-block;margin-left:6px;"></video>
                     </div>
                 </div>
 
@@ -362,8 +303,9 @@
                     questions = data.questions;
                 } else if (data.exam?.questions) {
                     questions = data.exam.questions;
-                }
-            } catch (e) { console.error('Failed to load questions:', e); }
+            } catch (e) {
+                console.error('Failed to load questions:', e);
+            }
         }
 
         document.getElementById('q-total').textContent = questions.length;
@@ -376,26 +318,41 @@
         startProctoring();
     }
 
-    // ─── Timer ───────────────────────────────────────────────────────────────
+    // ─── Countdown Timer ─────────────────────────────────────────────────────
 
     function startTimer() {
+        const totalMinutes = examData?.duration_minutes || 60;
+        const totalSeconds = totalMinutes * 60;
         examTimer = setInterval(() => {
             const elapsed = Math.floor((Date.now() - examStartTime) / 1000);
-            const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
-            const secs = String(elapsed % 60).padStart(2, '0');
+            const remaining = Math.max(0, totalSeconds - elapsed);
+            const mins = String(Math.floor(remaining / 60)).padStart(2, '0');
+            const secs = String(remaining % 60).padStart(2, '0');
             const el = document.getElementById('exam-timer');
-            if (el) el.textContent = `${mins}:${secs}`;
+            if (el) {
+                el.textContent = `${mins}:${secs}`;
+                if (remaining <= 300) {
+                    el.style.color = 'var(--danger)';
+                    el.style.fontWeight = '700';
+                }
+            }
+            if (remaining <= 0) {
+                clearInterval(examTimer);
+                alert('Time expired! Your exam will now be submitted automatically.');
+                submitExam();
+            }
         }, 1000);
     }
 
-    // ─── Questions ───��───────────────────────────────────────────────────────
+    // ─── Questions & Renderers ────────────────────────────────────────────────
 
     function buildQuestionNav() {
         const nav = document.getElementById('q-nav');
+        if (!nav) return;
         nav.innerHTML = questions.map((_, i) => {
-            const answered = answers[i] !== undefined;
+            const answered = answers[i] !== undefined && String(answers[i]).trim() !== '';
             const cls = i === currentQuestion ? 'active' : '';
-            return `<button class="btn btn-sm ${answered ? 'btn-success' : 'btn-secondary'}" onclick="goToQuestion(${i})" style="min-width:32px;">${i + 1}</button>`;
+            return `<button class="btn btn-sm ${answered ? 'btn-success' : 'btn-secondary'} ${cls}" onclick="goToQuestion(${i})" style="min-width:32px;">${i + 1}</button>`;
         }).join('');
     }
 
@@ -404,31 +361,92 @@
         if (!q) return;
 
         document.getElementById('q-current').textContent = currentQuestion + 1;
+        document.getElementById('q-total').textContent = questions.length;
 
-        const typeLabel = { mcq: 'Multiple Choice', numerical: 'Numerical', short_answer: 'Short Answer', long_answer: 'Long Answer' };
+        const typeLabel = {
+            mcq: 'Multiple Choice',
+            true_false: 'True / False',
+            numerical: 'Numerical',
+            mathematical: 'Mathematical & Derivation',
+            programming: 'Programming & Code',
+            short_answer: 'Short Answer',
+            long_answer: 'Long Answer'
+        };
+
         const content = document.getElementById('question-content');
         content.innerHTML = `
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-                <span class="status-badge info">Q${currentQuestion + 1}</span>
-                <span style="font-size:13px;color:var(--text-muted);">${typeLabel[q.type] || q.type} — ${q.marks} mark(s)</span>
+                <span class="status-badge info">Question ${currentQuestion + 1}</span>
+                <span style="font-size:13px;color:var(--text-muted);">${typeLabel[q.type] || q.type} &bull; ${q.marks} mark(s)</span>
             </div>
-            <p style="font-size:16px;line-height:1.7;">${escapeHtml(q.text)}</p>
+            <p style="font-size:16px;line-height:1.7;margin-bottom:12px;font-weight:500;">${escapeHtml(q.text)}</p>
         `;
 
         const area = document.getElementById('answer-area');
+        const currentAns = answers[currentQuestion] !== undefined ? answers[currentQuestion] : '';
+
         if (q.type === 'mcq' && q.options) {
             const opts = Array.isArray(q.options) ? q.options : (q.options ? q.options.split(',') : []);
             area.innerHTML = opts.map((opt, i) => {
-                const selected = answers[currentQuestion] === opt ? 'border-color:var(--accent);background:var(--accent-light);' : '';
+                const selected = currentAns === opt ? 'border-color:var(--accent);background:var(--accent-light, rgba(217,93,57,0.1));' : '';
                 return `<label style="display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;margin-bottom:8px;transition:var(--transition);${selected}">
-                    <input type="radio" name="answer" value="${escapeHtml(opt)}" ${answers[currentQuestion] === opt ? 'checked' : ''} onchange="saveAnswer(this.value)">
-                    <span>${escapeHtml(opt)}</span>
+                    <input type="radio" name="answer" value="${escapeHtml(opt)}" ${currentAns === opt ? 'checked' : ''} onchange="saveAnswer(this.value)">
+                    <span style="font-size:15px;">${escapeHtml(opt)}</span>
                 </label>`;
             }).join('');
+        } else if (q.type === 'true_false') {
+            const opts = ['True', 'False'];
+            area.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:400px;">
+                ${opts.map(opt => {
+                    const isSelected = String(currentAns).toLowerCase() === opt.toLowerCase();
+                    const borderCls = isSelected ? 'border-color:var(--accent);background:var(--accent-light, rgba(217,93,57,0.1));font-weight:700;' : '';
+                    return `<button type="button" class="btn btn-secondary" style="padding:16px;font-size:16px;${borderCls}" onclick="saveAnswer('${opt}')">
+                        ${opt === 'True' ? '&#x2714; True' : '&#x2716; False'}
+                    </button>`;
+                }).join('')}
+            </div>`;
         } else if (q.type === 'numerical') {
-            area.innerHTML = `<input type="number" class="form-input" placeholder="Enter numerical answer" value="${answers[currentQuestion] || ''}" oninput="saveAnswer(this.value)" step="any" style="max-width:300px;">`;
+            area.innerHTML = `
+                <div style="max-width:320px;">
+                    <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">Numerical value (decimals allowed)</label>
+                    <input type="number" class="form-input" placeholder="e.g. 42.5" value="${escapeHtml(String(currentAns))}" oninput="debouncedSave(this.value)" step="any">
+                </div>
+            `;
+        } else if (q.type === 'mathematical') {
+            area.innerHTML = `
+                <div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                        <span style="font-size:11px;color:var(--text-muted);align-self:center;margin-right:4px;">Symbols:</span>
+                        ${['π', '√', '²', '³', '±', '÷', '×', '∫', '∑', 'θ', 'Δ'].map(s => `
+                            <button type="button" class="btn btn-sm btn-secondary" style="padding:2px 8px;font-size:13px;" onclick="insertSymbol('${s}')">${s}</button>
+                        `).join('')}
+                    </div>
+                    <textarea id="math-editor" class="form-textarea" placeholder="Enter formulas, equations, or step-by-step derivation..." oninput="debouncedSave(this.value)" style="min-height:160px;font-family:var(--font-mono, monospace);font-size:14px;">${escapeHtml(String(currentAns))}</textarea>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Supports standard mathematical expressions and derivation steps.</div>
+                </div>
+            `;
+        } else if (q.type === 'programming') {
+            area.innerHTML = `
+                <div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span class="status-badge neutral" style="font-size:11px;">Python 3 Environment</span>
+                        <span style="font-size:12px;color:var(--text-muted);">Tab key indented (4 spaces)</span>
+                    </div>
+                    <textarea id="code-editor" class="form-textarea" placeholder="# Write your solution here&#10;def solution():&#10;    pass" oninput="debouncedSave(this.value)" onkeydown="handleTabKey(event)" style="min-height:220px;font-family:var(--font-mono, monospace);font-size:13.5px;line-height:1.5;background:var(--bg-secondary);">${escapeHtml(String(currentAns))}</textarea>
+                </div>
+            `;
         } else {
-            area.innerHTML = `<textarea class="form-textarea" placeholder="Type your answer here..." oninput="saveAnswer(this.value)" style="min-height:150px;">${answers[currentQuestion] || ''}</textarea>`;
+            // short_answer, long_answer, or essay
+            const wordCount = currentAns ? currentAns.trim().split(/\s+/).filter(Boolean).length : 0;
+            area.innerHTML = `
+                <div>
+                    <textarea class="form-textarea" placeholder="Type your answer here..." oninput="debouncedSave(this.value);updateWordCount(this);" style="min-height:160px;line-height:1.6;">${escapeHtml(String(currentAns))}</textarea>
+                    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-top:6px;">
+                        <span id="char-count">${String(currentAns).length} characters</span>
+                        <span id="word-count">${wordCount} words</span>
+                    </div>
+                </div>
+            `;
         }
 
         // Navigation buttons
@@ -438,10 +456,79 @@
         buildQuestionNav();
     }
 
+    // ─── Autosave & Input Helpers ────────────────────────────────────────────
+
+    let autosaveTimeout = null;
+
     function saveAnswer(value) {
         answers[currentQuestion] = value;
-        App.submitAnswer(questions[currentQuestion].id, value);
+        debouncedSave(value, true);
         buildQuestionNav();
+    }
+
+    function debouncedSave(value, immediate = false) {
+        answers[currentQuestion] = value;
+        const statusEl = document.getElementById('autosave-status');
+        if (statusEl) {
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--text-muted)';
+        }
+
+        clearTimeout(autosaveTimeout);
+        const delay = immediate ? 0 : 500;
+        autosaveTimeout = setTimeout(async () => {
+            try {
+                const q = questions[currentQuestion];
+                if (q) {
+                    App.submitAnswer(q.id || `q${currentQuestion + 1}`, value);
+                }
+                if (statusEl) {
+                    const now = new Date();
+                    statusEl.textContent = `✓ Saved (${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})})`;
+                    statusEl.style.color = 'var(--success)';
+                }
+            } catch (e) {
+                if (statusEl) {
+                    statusEl.textContent = '⚠️ Autosave failed';
+                    statusEl.style.color = 'var(--danger)';
+                }
+            }
+            buildQuestionNav();
+        }, delay);
+    }
+
+    function insertSymbol(sym) {
+        const ed = document.getElementById('math-editor');
+        if (!ed) return;
+        const start = ed.selectionStart;
+        const end = ed.selectionEnd;
+        const text = ed.value;
+        ed.value = text.substring(0, start) + sym + text.substring(end);
+        ed.selectionStart = ed.selectionEnd = start + sym.length;
+        ed.focus();
+        debouncedSave(ed.value);
+    }
+
+    function handleTabKey(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const ed = e.target;
+            const start = ed.selectionStart;
+            const end = ed.selectionEnd;
+            ed.value = ed.value.substring(0, start) + '    ' + ed.value.substring(end);
+            ed.selectionStart = ed.selectionEnd = start + 4;
+            debouncedSave(ed.value);
+        }
+    }
+
+    function updateWordCount(textarea) {
+        const text = textarea.value;
+        const chars = text.length;
+        const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+        const cEl = document.getElementById('char-count');
+        const wEl = document.getElementById('word-count');
+        if (cEl) cEl.textContent = `${chars} characters`;
+        if (wEl) wEl.textContent = `${words} words`;
     }
 
     function navigateQuestion(direction) {
@@ -449,6 +536,8 @@
         if (next >= 0 && next < questions.length) {
             currentQuestion = next;
             renderQuestion();
+        } else if (next >= questions.length) {
+            confirmSubmit();
         }
     }
 
@@ -458,11 +547,11 @@
     }
 
     function confirmSubmit() {
-        const answered = Object.keys(answers).length;
+        const answered = Object.values(answers).filter(v => v !== undefined && String(v).trim() !== '').length;
         const modal = document.getElementById('submit-modal');
         modal.style.display = 'flex';
         document.getElementById('submit-summary').textContent =
-            `${answered} of ${questions.length} questions answered. Are you sure?`;
+            `${answered} of ${questions.length} questions answered. Are you sure you wish to submit?`;
     }
 
     function closeModal() {
@@ -520,15 +609,15 @@
 
     // ─── Proctoring ──────────────────────────────────────────────────────────
 
+    // ─── Proctoring (Background Collection — No Student Risk Exposure) ──────
+
     function startProctoring() {
         proctoringInterval = setInterval(async () => {
             await runProctoringCheck();
-            await loadAgentTrace();
         }, 5000);
 
-        // Run first check immediately
-        setTimeout(runProctoringCheck, 1000);
-        setTimeout(loadAgentTrace, 1200);
+        // Run first check after warm-up
+        setTimeout(runProctoringCheck, 1500);
     }
 
     async function runProctoringCheck() {
@@ -537,15 +626,11 @@
         const currentExamId = App.examSession?.examId || examId;
         const sessionKey = App.examSession?.session_key || `${currentStudentId}:${currentExamId}`;
 
-        // Gather REAL browser + sensor stats (no placeholders)
         const browserStats = App.getBrowserStats();
         const keyboardStats = App.getKeyboardStats();
-        const mouseStats    = App.getMouseStats();
+        const mouseStats = App.getMouseStats();
 
-
-        // Capture webcam frame for real vision analysis.
-        // ARCHITECTURE: Only the raw image is sent to the backend.
-        // face_present/face_count/face_confidence/head_pose are server-computed.
+        // Capture webcam frame for server-side vision analysis
         let facePresent = false, faceCount = 0, faceConfidence = 0.0, headPose = { yaw: 0, pitch: 0, roll: 0 };
         try {
             const examVideo = document.getElementById('exam-webcam');
@@ -555,48 +640,27 @@
                 canvas.height = examVideo.videoHeight || 480;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(examVideo, 0, 0);
-                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+                const imageData = canvas.toDataURL('image/jpeg', 0.7);
 
-                // Send ONLY the image - backend runs real FaceTracker inference
                 const visionResult = await App.apiPost('/api/vision/analyze', {
                     session_key: sessionKey,
                     image: imageData,
                 });
 
-                const visionStatus = visionResult.vision_status || 'UNKNOWN';
-                if (visionStatus === 'OK' && visionResult.image_processed) {
-                    // Use backend-inferred values only - never client-supplied
-                    facePresent    = visionResult.face_present;
-                    faceCount      = visionResult.face_count;
+                if (visionResult && visionResult.vision_status === 'OK' && visionResult.image_processed) {
+                    facePresent = visionResult.face_present;
+                    faceCount = visionResult.face_count;
                     faceConfidence = visionResult.face_confidence;
-                    headPose       = visionResult.head_pose || { yaw: 0, pitch: 0, roll: 0 };
-                } else if (visionStatus === 'VISION_LIB_UNAVAILABLE') {
-                    addProctoringEvent('Vision Unavailable', 'info', 'Server-side vision library not installed');
-                } else if (visionStatus !== 'OK') {
-                    console.warn('Vision pipeline status:', visionStatus);
+                    headPose = visionResult.head_pose || { yaw: 0, pitch: 0, roll: 0 };
                 }
-
-                if (visionResult.events && visionResult.events.length > 0) {
-                    visionResult.events.forEach(evt => {
-                        addProctoringEvent(
-                            evt.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                            evt.confidence > 0.7 ? 'danger' : 'warning',
-                            'Confidence: ' + Math.round(evt.confidence * 100) + '%'
-                        );
-                    });
-                }
-
-                const visionRisk = visionResult.risk_contribution || 0;
-                updateRiskDisplay(visionRisk);
             }
         } catch (e) {
-            // Vision analysis failed - continue with behavioral-only proctoring
-            console.warn('Vision analysis failed:', e.message);
+            console.warn('Vision capture cycle:', e.message);
         }
 
-        // Send behavioral analysis
+        // Send behavioral data to server agent for proctoring analysis
         try {
-            const analysis = await App.apiPost('/api/behavioral/analyze', {
+            await App.apiPost('/api/behavioral/analyze', {
                 session_key: sessionKey,
                 face_present: facePresent,
                 face_count: faceCount,
@@ -607,229 +671,9 @@
                 browser: browserStats,
                 session_elapsed: elapsed,
             });
-
-            if (analysis && analysis.agent_risk !== undefined) {
-                updateRiskDisplay(analysis.agent_risk);
-            }
-
-            // Log browser events
-            if (browserStats.tab_switches > 0) {
-                addProctoringEvent('Tab Switch Detected', 'warning', `Tab switches: ${browserStats.tab_switches}`);
-            }
-            if (browserStats.fullscreen_exits > 0) {
-                addProctoringEvent('Fullscreen Exit', 'danger', `Exited fullscreen ${browserStats.fullscreen_exits} times`);
-            }
         } catch (e) {
-            // Silently handle proctoring errors
+            // Behavioral collection error handled silently
         }
-    }
-
-    function updateRiskDisplay(risk) {
-        const pct = Math.round(risk * 100);
-        const bar = document.getElementById('risk-bar');
-        const label = document.getElementById('risk-label');
-        const liveRisk = document.getElementById('live-risk');
-
-        if (bar) bar.style.width = pct + '%';
-        if (liveRisk) liveRisk.textContent = pct + '%';
-
-        let cls, color;
-        if (risk < 0.3) { cls = 'low'; color = 'var(--success)'; }
-        else if (risk < 0.6) { cls = 'medium'; color = 'var(--warning)'; }
-        else if (risk < 0.8) { cls = 'high'; color = '#f97316'; }
-        else { cls = 'critical'; color = 'var(--danger)'; }
-
-        if (bar) { bar.className = 'risk-fill ' + cls; }
-        if (label) { label.textContent = cls.replace('critical', 'Critical').replace('high', 'High').replace('medium', 'Medium'); label.style.color = color; }
-    }
-
-    async function loadAgentTrace() {
-        try {
-            const currentStudentId = App.examSession?.studentId || studentId;
-            const currentExamId = App.examSession?.examId || examId;
-            const sessionKey = App.examSession?.session_key || `${currentStudentId}:${currentExamId}`;
-            const skParam = sessionKey ? ('?session_key=' + encodeURIComponent(sessionKey)) : '';
-            const resp = await App.apiGet('/api/agent/status' + skParam);
-            const panel = document.getElementById('risk-analysis-panel');
-            if (!panel) return;
-
-            const risk = resp.current_risk || 0;
-            const state = resp.state || 'NORMAL';
-            const iteration = resp.iteration || 0;
-            // Real trace from IntegrityDecisionTrace (may be null if no events yet)
-            const trace = resp.last_trace || null;
-
-            panel.style.display = 'block';
-
-            // State badge
-            const badge = document.getElementById('agent-state-badge');
-            if (badge) {
-                badge.textContent = state;
-                const stateCls = state === 'NORMAL' || state === 'LOW_CONCERN' ? 'success'
-                    : state === 'MONITOR' || state === 'TECHNICAL_EVENT' ? 'warning'
-                    : 'danger';
-                badge.className = 'status-badge ' + stateCls;
-                document.getElementById('trace-decision').textContent = state.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            }
-
-            // Risk score
-            const pct = Math.round(risk * 100);
-            document.getElementById('trace-risk-score').innerHTML = pct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">/100</span>';
-
-            // Uncertainty mapping
-            const uncertaintyMap = {
-                'NORMAL': 'LOW', 'LOW_CONCERN': 'LOW', 'MONITOR': 'MEDIUM',
-                'SUSPICIOUS': 'MEDIUM', 'HIGH_RISK': 'HIGH', 'REVIEW_REQUIRED': 'HIGH',
-                'TECHNICAL_EVENT': 'LOW', 'INSUFFICIENT_EVIDENCE': 'HIGH'
-            };
-            document.getElementById('trace-uncertainty').textContent = uncertaintyMap[state] || 'MEDIUM';
-
-            // ── Use real IntegrityDecisionTrace when available ────────────
-            if (trace) {
-                // Confidence from ML trace (uncertainty.confidence is 0–1)
-                const confPct = Math.round((trace.uncertainty?.confidence || 0) * 100);
-                document.getElementById('trace-confidence').innerHTML =
-                    confPct + '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">%</span>';
-                // Corroboration modality count from trace
-                const corrobData = trace.corroboration || {};
-                const modalityCount = corrobData.modality_count || (trace.contributions || []).length || 1;
-                document.getElementById('trace-corroboration').textContent = modalityCount;
-                // Decision reason from trace
-                const traceDecision = trace.decision_reason || trace.decision || state;
-                document.getElementById('trace-decision').textContent = String(traceDecision).replace(/_/g, ' ');
-                // Previous risk from trace
-                const prevRiskPct = Math.round((trace.risk?.previous || 0) * 100);
-                document.getElementById('trace-prev-risk').textContent = prevRiskPct;
-            } else {
-                // Fallback: load history for corroboration + contributions
-                const historyResp = await App.apiGet('/api/agent/history' + skParam);
-                const history = historyResp.history || [];
-                if (history.length > 0) {
-                    const last = history[history.length - 1];
-                    const prevRisk = history.length > 1 ? Math.round(history[history.length - 2].risk_score * 100) : 0;
-                    document.getElementById('trace-prev-risk').textContent = prevRisk;
-
-                    // UI_HEURISTIC fallback: infer modality from event-name strings
-                    // (Only used when real trace is unavailable)
-                    const events = last.events_detected || [];
-                    const modalities = new Set(events.map(e => {
-                        const t = (e.type || '').toLowerCase();
-                        if (t.includes('face') || t.includes('gaze') || t.includes('head')) return 'vision';
-                        if (t.includes('audio') || t.includes('speech') || t.includes('sound')) return 'audio';
-                        if (t.includes('key') || t.includes('typing')) return 'keyboard';
-                        if (t.includes('mouse') || t.includes('click')) return 'mouse';
-                        if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen')) return 'browser';
-                        return 'other';
-                    }));
-                    const modalityCount = modalities.size || 1;
-                    // HONEST FALLBACK: no manufactured confidence numbers.
-                    // We show modality count from real history but mark confidence as unavailable.
-                    document.getElementById('trace-confidence').innerHTML =
-                        '<span style="font-size:14px;font-weight:400;color:var(--text-muted);">No trace data</span>';
-                    document.getElementById('trace-corroboration').textContent = modalityCount;
-                    renderContributions(events);
-                    renderCorroboration(events);
-                }
-            }
-
-            // Render contributions from real trace if available
-            if (trace && trace.contributions && trace.contributions.length > 0) {
-                const traceEvents = trace.contributions.map(c => ({ type: c.event_type, confidence: c.confidence }));
-                renderContributions(traceEvents);
-                renderCorroboration(traceEvents);
-            }
-        } catch (e) {
-            // Agent not running, hide panel
-            const panel = document.getElementById('risk-analysis-panel');
-            if (panel) panel.style.display = 'none';
-        }
-    }
-
-    function renderContributions(events) {
-        const container = document.getElementById('trace-contributions');
-        const list = document.getElementById('contributions-list');
-        if (!container || !list || events.length === 0) return;
-        container.style.display = 'block';
-
-        const modalityColors = {
-            vision: '#D95D39', audio: '#8b5cf6', keyboard: '#10b981',
-            mouse: '#f59e0b', browser: '#ef4444', other: '#6b7280'
-        };
-        const modalityNames = {
-            face_absent: 'Vision', multiple_faces: 'Vision', head_turned: 'Vision', gaze_away: 'Vision',
-            speech_detected: 'Audio', loud_audio: 'Audio',
-            copy_paste: 'Keyboard', paste_detected: 'Keyboard', rapid_typing: 'Keyboard',
-            rapid_movement: 'Mouse', idle_mouse: 'Mouse', right_click_spam: 'Mouse',
-            tab_switch: 'Browser', window_blur: 'Browser', fullscreen_exit: 'Browser',
-        };
-        // Use real contribution values from IntegrityDecisionTrace when present.
-        // Events from history fallback may not have contribution; show raw severity only if available.
-        list.innerHTML = events.map(e => {
-            const t = e.type || 'unknown';
-            const mod = modalityNames[t] || 'Other';
-            const color = modalityColors[mod.toLowerCase()] || modalityColors.other;
-            // Use real weighted contribution from trace (0-1), or raw_severity, or omit
-            const contrib = e.contribution != null ? e.contribution
-                          : e.raw_severity  != null ? e.raw_severity
-                          : null;
-            const contribHtml = contrib != null
-                ? `<div style="font-size:13px;font-weight:600;color:var(--danger);">+${Math.round(contrib * 100)}%</div>`
-                : `<div style="font-size:11px;color:var(--text-muted);">risk: --</div>`;
-            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
-                <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-                <div style="flex:1;min-width:0;">
-                    <div style="font-size:13px;font-weight:500;">${t.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</div>
-                    <div style="font-size:11px;color:var(--text-muted);">${mod}</div>
-                </div>
-                ${contribHtml}
-            </div>`;
-        }).join('');
-    }
-
-    function renderCorroboration(events) {
-        const container = document.getElementById('trace-corrob');
-        const timeline = document.getElementById('corrob-timeline');
-        if (!container || !timeline || events.length === 0) return;
-        container.style.display = 'block';
-
-        const modColors = { vision: '#D95D39', audio: '#8b5cf6', keyboard: '#10b981', mouse: '#f59e0b', browser: '#ef4444' };
-        const modKey = { face_absent: 'vision', multiple_faces: 'vision', head_turned: 'vision', gaze_away: 'vision',
-            speech_detected: 'audio', loud_audio: 'audio',
-            tab_switch: 'browser', window_blur: 'browser', fullscreen_exit: 'browser',
-            copy_paste: 'keyboard', paste_detected: 'keyboard', rapid_typing: 'keyboard' };
-
-        timeline.innerHTML = events.slice(0, 8).map(e => {
-            const key = modKey[e.type] || 'other';
-            const color = modColors[key] || '#6b7280';
-            const label = (e.type || '').replace(/_/g, ' ').split(' ')[0].toUpperCase();
-            return `<div style="display:flex;align-items:center;gap:4px;background:${color}20;border:1px solid ${color}40;border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;">
-                <div style="width:6px;height:6px;border-radius:50%;background:${color};"></div>
-                <span style="color:${color};font-weight:600;">${label}</span>
-            </div>`;
-        }).join('') + (events.length > 8 ? `<span style="font-size:11px;color:var(--text-muted);">+${events.length - 8} more</span>` : '');
-    }
-
-    // Keep existing addProctoringEvent below
-
-    function addProctoringEvent(title, type, detail) {
-        proctoringEvents.push({ title, type, detail, time: new Date() });
-        const container = document.getElementById('event-log');
-        const icon = type === 'danger' ? '&#x26A0;&#xFE0F;' : type === 'warning' ? '&#x1F4A1;' : '&#x1F514;';
-        const cls = type === 'danger' ? 'danger' : type === 'warning' ? 'warning' : 'info';
-
-        const item = document.createElement('div');
-        item.className = 'evidence-item';
-        item.innerHTML = `
-            <div class="evidence-icon ${cls}">${icon}</div>
-            <div class="evidence-body">
-                <div class="evidence-title">${escapeHtml(title)}</div>
-                <div class="evidence-meta"><span>${escapeHtml(detail || '')}</span><span>${new Date().toLocaleTimeString()}</span></div>
-            </div>
-        `;
-
-        if (container.querySelector('.empty-state')) container.innerHTML = '';
-        container.prepend(item);
-        document.getElementById('event-count').textContent = proctoringEvents.length + ' events';
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

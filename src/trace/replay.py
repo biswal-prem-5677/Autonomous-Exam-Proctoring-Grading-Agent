@@ -70,6 +70,22 @@ class ReplaySnapshot:
         }
 
 
+def _safe_timestamp(val: Any) -> float:
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val)
+        except ValueError:
+            try:
+                return datetime.fromisoformat(val.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return 0.0
+    return 0.0
+
+
 class DecisionReplayEngine:
     """Step-by-step deterministic decision replayer for audited sessions."""
 
@@ -82,14 +98,18 @@ class DecisionReplayEngine:
     def load_from_traces(self, traces: List[Dict[str, Any]]) -> int:
         """Load session chronology from an ordered list of IntegrityDecisionTraces."""
         self._snapshots.clear()
-        sorted_traces = sorted(traces, key=lambda t: t.get("timestamp", 0))
+        sorted_traces = sorted(traces, key=lambda t: _safe_timestamp(t.get("timestamp", 0)))
 
         for idx, t in enumerate(sorted_traces):
-            ts = t.get("timestamp", 0.0)
+            ts = _safe_timestamp(t.get("timestamp", 0.0))
             iso = datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts > 0 else "00:00:00"
             risk_info = t.get("risk", {})
-            prev_r = risk_info.get("previous", 0.0)
-            curr_r = risk_info.get("current", 0.0)
+            if isinstance(risk_info, dict):
+                prev_r = risk_info.get("previous", t.get("previous_risk", 0.0))
+                curr_r = risk_info.get("current", t.get("current_risk", t.get("risk_score", 0.0)))
+            else:
+                prev_r = t.get("previous_risk", 0.0)
+                curr_r = t.get("current_risk", t.get("risk_score", 0.0))
 
             corrob = t.get("corroboration") or {}
             uncert = t.get("uncertainty") or {}

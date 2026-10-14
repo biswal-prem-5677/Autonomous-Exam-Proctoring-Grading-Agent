@@ -6,8 +6,11 @@ import numpy as np
 
 try:
     import mediapipe as mp
-    MEDIAPIPE_AVAILABLE = True
-except ImportError:
+    if hasattr(mp, "solutions") and hasattr(mp.solutions, "face_detection") and hasattr(mp.solutions, "face_mesh"):
+        MEDIAPIPE_AVAILABLE = True
+    else:
+        MEDIAPIPE_AVAILABLE = False
+except Exception:
     MEDIAPIPE_AVAILABLE = False
 
 from src.vision.head_pose import HeadPoseEstimator
@@ -19,19 +22,25 @@ class FaceTracker:
     def __init__(self, confidence_threshold: float = 0.7):
         self.confidence_threshold = confidence_threshold
         self.face_count_history: list = []
+        self.use_mediapipe = False
 
         if MEDIAPIPE_AVAILABLE:
-            self._face_detection = mp.solutions.face_detection.FaceDetection(
-                model_selection=0, min_detection_confidence=confidence_threshold
-            )
-            self._face_mesh = mp.solutions.face_mesh.FaceMesh(
-                static_image_mode=False,
-                max_num_faces=2,
-                refine_landmarks=True,
-                min_detection_confidence=confidence_threshold,
-                min_tracking_confidence=0.5,
-            )
-        else:
+            try:
+                self._face_detection = mp.solutions.face_detection.FaceDetection(
+                    model_selection=0, min_detection_confidence=confidence_threshold
+                )
+                self._face_mesh = mp.solutions.face_mesh.FaceMesh(
+                    static_image_mode=False,
+                    max_num_faces=2,
+                    refine_landmarks=True,
+                    min_detection_confidence=confidence_threshold,
+                    min_tracking_confidence=0.5,
+                )
+                self.use_mediapipe = True
+            except Exception:
+                self.use_mediapipe = False
+
+        if not self.use_mediapipe:
             import cv2
             self._face_cascade = cv2.CascadeClassifier(
                 cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -47,7 +56,7 @@ class FaceTracker:
                 "confidence": 0.0, "landmarks": None, "head_pose": None,
             }
 
-        if MEDIAPIPE_AVAILABLE:
+        if self.use_mediapipe:
             return self._process_mediapipe(frame)
         return self._process_opencv_fallback(frame)
 

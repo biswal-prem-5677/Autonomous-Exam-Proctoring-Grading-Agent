@@ -19,6 +19,10 @@ class LongAnswerScore:
     max_score: float = 0.0
     details: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def percentage(self) -> float:
+        return (self.final_score / self.max_score * 100.0) if self.max_score > 0 else 0.0
+
 
 class LongAnswerGrader:
     """Multi-signal long-answer grading.
@@ -112,12 +116,29 @@ class LongAnswerGrader:
         coverage_score = self._score_coverage(student_answer, reference_answer, keywords)
 
         # ── Weighted combination ────────────────────────────────────────
-        combined = (
-            self.w_semantic * semantic_sim
-            + self.w_keyword * keyword_score
-            + self.w_structure * structure_score
-            + self.w_coverage * coverage_score
-        )
+        # When no keywords were provided, redistribute keyword weight
+        # proportionally to the other three signals so scores are not
+        # artificially penalised by the absence of keyword metadata.
+        if not keywords:
+            denom = self.w_semantic + self.w_structure + self.w_coverage
+            if denom > 0:
+                w_sem = self.w_semantic / denom
+                w_str = self.w_structure / denom
+                w_cov = self.w_coverage / denom
+            else:
+                w_sem = w_str = w_cov = 1.0 / 3.0
+            combined = (
+                w_sem * semantic_sim
+                + w_str * structure_score
+                + w_cov * coverage_score
+            )
+        else:
+            combined = (
+                self.w_semantic * semantic_sim
+                + self.w_keyword * keyword_score
+                + self.w_structure * structure_score
+                + self.w_coverage * coverage_score
+            )
 
         result = LongAnswerScore(
             semantic_score=semantic_sim,

@@ -5,6 +5,7 @@ No external APIs — all computation is local.
 """
 
 import sys
+import json
 import time
 import uuid
 from pathlib import Path
@@ -398,6 +399,99 @@ def add_questions_bulk(exam_id):
     return jsonify({"questions": added, "count": len(added)})
 
 
+# ── Exam Roster & Release Endpoints ──────────────────────────────────────────
+
+@app.route("/api/exams/<exam_id>/roster", methods=["GET", "POST"])
+def exam_roster_api(exam_id):
+    """Manage enrolled students for an exam."""
+    db = _get_db()
+    if request.method == "GET":
+        roster = db.get_roster(exam_id)
+        return jsonify({"exam_id": exam_id, "roster": roster, "count": len(roster)})
+
+    data = request.get_json(force=True) if request.data else {}
+    student_id = data.get("student_id")
+    student_name = data.get("student_name", "")
+    student_email = data.get("student_email", "")
+    if not student_id:
+        return jsonify({"error": "student_id is required"}), 400
+
+    db.enroll_student(exam_id, student_id, student_name, student_email)
+    return jsonify({
+        "status": "enrolled",
+        "exam_id": exam_id,
+        "student_id": student_id,
+        "student_name": student_name,
+        "student_email": student_email,
+    })
+
+
+@app.route("/api/exams/<exam_id>/roster/<student_id>", methods=["DELETE"])
+def remove_from_roster_api(exam_id, student_id):
+    """Remove a student from the exam roster."""
+    db = _get_db()
+    removed = db.remove_student_from_roster(exam_id, student_id)
+    return jsonify({
+        "status": "removed" if removed else "not_found",
+        "exam_id": exam_id,
+        "student_id": student_id,
+    })
+
+
+@app.route("/api/exams/<exam_id>/roster/bulk", methods=["POST"])
+def bulk_enroll_roster(exam_id):
+    """Bulk enroll students into an exam roster."""
+    db = _get_db()
+    data = request.get_json(force=True) if request.data else {}
+    students = data.get("students", [])
+    if not isinstance(students, list):
+        return jsonify({"error": "students must be a list"}), 400
+
+    enrolled = []
+    for s in students:
+        sid = s.get("student_id")
+        if sid:
+            sname = s.get("student_name", "")
+            semail = s.get("student_email", "")
+            db.enroll_student(exam_id, sid, sname, semail)
+            enrolled.append({"student_id": sid, "student_name": sname, "student_email": semail})
+    return jsonify({
+        "status": "success",
+        "exam_id": exam_id,
+        "enrolled_count": len(enrolled),
+        "students": enrolled,
+    })
+
+
+@app.route("/api/exams/<exam_id>/release", methods=["POST"])
+def release_exam_api(exam_id):
+    """Publish/release an exam to students or revoke release."""
+    data = request.get_json(force=True) if request.data else {}
+    is_released = bool(data.get("is_released", True))
+    db = _get_db()
+    success = db.set_exam_released(exam_id, is_released)
+    exam = _exam_manager.get_exam(exam_id)
+    if exam:
+        exam.is_released = is_released
+    return jsonify({
+        "status": "success",
+        "exam_id": exam_id,
+        "is_released": is_released,
+        "updated": success,
+    })
+
+
+@app.route("/api/exams/<exam_id>/release-status", methods=["GET"])
+def get_exam_release_status(exam_id):
+    """Check if an exam is published/released to students."""
+    exam = _exam_manager.get_exam(exam_id)
+    if not exam:
+        return jsonify({"error": "Exam not found"}), 404
+    is_released = getattr(exam, "is_released", False)
+    return jsonify({"exam_id": exam_id, "is_released": bool(is_released)})
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  EXAM SESSIONS (student taking exam)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -457,6 +551,14 @@ def create_session():
 
     # Initialize proctoring agent for this session with active trained ML models
     agent = _create_proctoring_agent(_config)
+    if student_id in _student_baselines:
+        agent.set_baseline(_student_baselines[student_id])
+    exam_policy_name = (getattr(exam, "settings", None) or {}).get("policy", "standard")
+    from src.context import ExamContext, get_default_policy
+    agent.set_context(ExamContext(
+        policy=get_default_policy(exam_policy_name),
+        exam_duration_seconds=float(duration * 60)
+    ))
     _proctoring_agents[session_key] = agent
 
     # Initialize evidence log
@@ -849,15 +951,20 @@ def proctor_summary(student_id, exam_id):
 
     trace = agent.get_last_trace()
     if trace:
+        curr_risk = trace.get("current_risk")
+        if curr_risk is None:
+            curr_risk = trace.get("risk", {}).get("current", 0.0)
+        prev_risk = trace.get("previous_risk")
+        if prev_risk is None:
+            prev_risk = trace.get("risk", {}).get("previous", 0.0)
+
         return jsonify({
             "status": "active",
             "student_id": student_id,
             "exam_id": exam_id,
-            "risk_score": trace.get("current_risk", 0.0),
-            "previous_risk": trace.get("previous_risk", 0.0),
-            "risk_delta": round(
-                trace.get("current_risk", 0.0) - trace.get("previous_risk", 0.0), 4
-            ),
+            "risk_score": float(curr_risk or 0.0),
+            "previous_risk": float(prev_risk or 0.0),
+            "risk_delta": round(float(curr_risk or 0.0) - float(prev_risk or 0.0), 4),
             "decision": trace.get("decision"),
             "decision_reason": trace.get("decision_reason"),
             "confidence": trace.get("uncertainty", {}).get("confidence", 0.0),
@@ -877,12 +984,13 @@ def proctor_summary(student_id, exam_id):
 
     # Fallback: build from agent status
     status = agent.get_status()
+    risk_score = status.get("current_risk", status.get("risk_score", 0.0))
     return jsonify({
         "status": "active",
         "student_id": student_id,
         "exam_id": exam_id,
-        "risk_score": status.get("risk_score", 0.0),
-        "decision": "NORMAL",
+        "risk_score": float(risk_score or 0.0),
+        "decision": status.get("state", "NORMAL"),
         "confidence": 0.0,
         "events": [],
         "contributions": [],
@@ -1109,6 +1217,7 @@ def predict_performance():
     if not data:
         data = {}
     session_key = data.get("session_key") or data.get("student_id") or "default"
+    student_id = data.get("student_id") or session_key.split(":")[0]
     features_list = data.get("features", [])
 
     import numpy as np
@@ -1121,24 +1230,56 @@ def predict_performance():
         predictor = PerformancePredictor()
         _performance_predictors[session_key] = predictor
 
-    # Auto-fit on default synthetic baseline if not already fitted
     if not getattr(predictor, "_fitted", False):
-        n_feat = features.shape[1] if features.size > 0 else 4
-        rng = np.random.RandomState(42)
-        X_init = rng.uniform(0.0, 1.0, size=(20, n_feat))
-        y_init = np.clip(X_init[:, 0] * 50 + X_init[:, 1] * 30 + 20, 0, 100)
-        predictor.fit(X_init, y_init)
+        # Attempt to fit model on historical submission data from the database
+        db = _get_db()
+        submissions = db.list_sessions(limit=50)
+        valid_samples = []
+        target_scores = []
+        for s in (submissions or []):
+            score = s.get("score")
+            feat = s.get("features")
+            if score is not None and feat and isinstance(feat, list):
+                valid_samples.append(feat)
+                target_scores.append(float(score))
+
+        if len(valid_samples) >= 3 and features.size > 0 and len(valid_samples[0]) == features.shape[1]:
+            try:
+                predictor.fit(np.array(valid_samples), np.array(target_scores))
+            except Exception:
+                pass
+
+    if not getattr(predictor, "_fitted", False):
+        return jsonify({
+            "status": "insufficient_data",
+            "session_key": session_key,
+            "message": "At least 3 graded past submissions required to fit prediction model",
+            "prediction": None,
+            "score": None,
+        })
 
     if features.size > 0:
-        result = predictor.predict(features)
-        pred_list = result.tolist() if hasattr(result, "tolist") else list(result)
-        val = pred_list[0] if isinstance(pred_list, list) and len(pred_list) == 1 else pred_list
-        return jsonify({
-            "session_key": session_key,
-            "prediction": val,
-            "score": round(float(val if isinstance(val, (int, float)) else val[0]), 2),
-        })
-    return jsonify({"session_key": session_key, "prediction": 75.0, "score": 75.0})
+        try:
+            result = predictor.predict(features)
+            pred_list = result.tolist() if hasattr(result, "tolist") else list(result)
+            val = pred_list[0] if isinstance(pred_list, list) and len(pred_list) == 1 else pred_list
+            score_val = round(float(val if isinstance(val, (int, float)) else val[0]), 2)
+            return jsonify({
+                "status": "success",
+                "session_key": session_key,
+                "prediction": val,
+                "score": score_val,
+            })
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e), "session_key": session_key}), 400
+
+    return jsonify({
+        "status": "insufficient_data",
+        "session_key": session_key,
+        "message": "No feature vector provided for prediction",
+        "prediction": None,
+        "score": None,
+    })
 
 
 @app.route("/api/predict/difficulty", methods=["POST"])
@@ -1557,14 +1698,36 @@ def auth_logout():
     return jsonify({"message": "Logged out"})
 
 
-@app.route("/api/auth/me", methods=["GET"])
+@app.route("/api/auth/me", methods=["GET", "PUT"])
 def auth_me():
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token:
         return jsonify({"error": "No token provided"}), 401
-    user = _get_auth_db().get_session_user(token)
+    auth_db = _get_auth_db()
+    user = auth_db.get_session_user(token)
     if not user:
         return jsonify({"error": "Invalid or expired session"}), 401
+
+    if request.method == "PUT":
+        data = request.get_json(force=True) if request.data else {}
+        allowed = {}
+        if "full_name" in data:
+            allowed["full_name"] = str(data["full_name"])
+        if "email" in data:
+            allowed["email"] = str(data["email"])
+        if "preferences" in data and isinstance(data["preferences"], dict):
+            allowed["preferences"] = json.dumps(data["preferences"])
+        if "password" in data and data["password"]:
+            from src.database.auth import hash_password
+            allowed["password_hash"] = hash_password(str(data["password"]))
+
+        if allowed:
+            auth_db.update_user(user["user_id"], **allowed)
+            user = auth_db.get_user(user["user_id"])
+            if user:
+                user.pop("password_hash", None)
+        return jsonify({"message": "Profile updated", "user": user})
+
     return jsonify({"user": user})
 
 
@@ -1922,8 +2085,14 @@ def agent_status_api():
     session_key = request.args.get("session_key", "")
     agent = _proctoring_agents.get(session_key)
     if not agent:
-        return jsonify({"state": "NORMAL", "running": False, "iteration": 0, "current_risk": 0.0, "evidence_events": 0, "history_length": 0})
-    return jsonify(agent.get_status())
+        return jsonify({
+            "state": "NORMAL", "running": False, "iteration": 0,
+            "current_risk": 0.0, "evidence_events": 0, "history_length": 0,
+            "agent_session_id": None
+        })
+    status = agent.get_status()
+    status["agent_session_id"] = getattr(agent, "session_id", None)
+    return jsonify(status)
 
 
 @app.route("/api/agent/history", methods=["GET"])
@@ -2269,6 +2438,153 @@ def release_grades(student_id, exam_id):
         "released_by": released_by,
         "persisted": persisted,
     })
+
+
+# ── Grade Override Endpoints ────────────────────────────────────────────────
+
+@app.route("/api/grading/override", methods=["POST"])
+def grade_override():
+    """Examiner manual grade override with audit trail."""
+    data = request.get_json(force=True) if request.data else {}
+    session_id = data.get("session_id") or data.get("submission_id")
+    question_id = data.get("question_id")
+    override_score = data.get("override_score")
+    if override_score is None:
+        override_score = data.get("new_score")
+    original_score = data.get("original_score")
+    if original_score is None:
+        original_score = data.get("previous_score", 0.0)
+    examiner_id = data.get("examiner_id")
+    reason = data.get("reason", "")
+
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if user:
+        examiner_id = examiner_id or user.get("username", user.get("user_id"))
+
+    if not session_id or not question_id or override_score is None:
+        return jsonify({"error": "session_id (or submission_id), question_id, and override_score are required"}), 400
+
+    try:
+        new_score = float(override_score)
+        prev_score = float(original_score) if original_score is not None else None
+    except (ValueError, TypeError):
+        return jsonify({"error": "Scores must be numeric"}), 400
+
+    db = _get_db()
+    override_id = db.record_grade_override(
+        session_id=str(session_id),
+        question_id=str(question_id),
+        previous_score=prev_score,
+        new_score=new_score,
+        reason=str(reason),
+        examiner_id=str(examiner_id or "examiner"),
+    )
+
+    return jsonify({
+        "status": "success",
+        "override_id": override_id,
+        "session_id": session_id,
+        "question_id": question_id,
+        "previous_score": prev_score,
+        "new_score": new_score,
+        "override_score": new_score,
+        "reason": reason,
+        "examiner_id": examiner_id or "examiner",
+    })
+
+
+@app.route("/api/grading/overrides", defaults={"session_id": None}, methods=["GET"])
+@app.route("/api/grading/overrides/<session_id>", methods=["GET"])
+def get_grade_overrides_api(session_id):
+    """Retrieve grade overrides, optionally filtered by session_id."""
+    db = _get_db()
+    overrides = db.get_grade_overrides(session_id=session_id)
+    return jsonify({"session_id": session_id, "overrides": overrides, "count": len(overrides)})
+
+
+# ── Examiner Actions Endpoints ───────────────────────────────────────────────
+
+@app.route("/api/examiner/action", methods=["POST"])
+def examiner_action_api():
+    """Record an examiner intervention (warn, flag, pause, resume, terminate, note)."""
+    data = request.get_json(force=True) if request.data else {}
+    action_type = data.get("action_type")
+    session_id = data.get("session_id") or data.get("session_key", "")
+    student_id = data.get("student_id", "")
+    exam_id = data.get("exam_id", "")
+    message = data.get("message") or data.get("reason") or ""
+    examiner_id = data.get("examiner_id")
+
+    if not session_id and student_id and exam_id:
+        session_id = f"{student_id}:{exam_id}"
+
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if user:
+        examiner_id = examiner_id or user.get("username", user.get("user_id"))
+
+    valid_actions = ("warn", "flag", "pause", "resume", "terminate", "note")
+    if not action_type or action_type not in valid_actions:
+        return jsonify({"error": f"Invalid action_type. Must be one of: {', '.join(valid_actions)}"}), 400
+
+    if not session_id:
+        return jsonify({"error": "session_id is required"}), 400
+
+    db = _get_db()
+    action_id = db.record_examiner_action(
+        session_id=str(session_id),
+        action_type=action_type,
+        message=str(message),
+        examiner_id=str(examiner_id or "examiner"),
+    )
+
+    # If action is pause/terminate, handle live session/agent
+    agent = _proctoring_agents.get(session_id)
+    session_info = _active_sessions.get(session_id)
+    if action_type == "terminate":
+        if agent and hasattr(agent, "stop_loop"):
+            agent.stop_loop()
+        if session_info and "controller" in session_info:
+            try:
+                session_info["controller"].end_exam()
+            except Exception:
+                pass
+    elif action_type == "pause":
+        if session_info and "controller" in session_info:
+            try:
+                session_info["controller"].pause_exam()
+            except Exception:
+                pass
+
+    return jsonify({
+        "status": "success",
+        "action_id": action_id,
+        "action_type": action_type,
+        "session_id": session_id,
+        "message": message,
+        "examiner_id": examiner_id or "examiner",
+    })
+
+
+@app.route("/api/examiner/actions", defaults={"session_id": None}, methods=["GET"])
+@app.route("/api/examiner/actions/<session_id>", methods=["GET"])
+def list_examiner_actions_api(session_id):
+    """Retrieve recorded examiner interventions."""
+    session_key = session_id or request.args.get("session_id") or request.args.get("session_key")
+    if not session_key:
+        student_id = request.args.get("student_id")
+        exam_id = request.args.get("exam_id")
+        if student_id and exam_id:
+            session_key = f"{student_id}:{exam_id}"
+
+    if not session_key:
+        return jsonify({"error": "session_id is required"}), 400
+
+    db = _get_db()
+    actions = db.get_examiner_actions(session_id=session_key)
+    return jsonify({"session_id": session_key, "actions": actions, "count": len(actions)})
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2904,11 +3220,25 @@ def get_audit_chain(session_id: str):
     """Retrieve cryptographic SHA-256 Merkle audit entries for a session."""
     limit = int(request.args.get("limit", 100))
     offset = int(request.args.get("offset", 0))
-    entries = _audit_chain.get_entries(session_id=session_id, limit=limit, offset=offset)
-    total = _audit_chain.get_chain_length(session_id=session_id)
+    target_id = session_id
+    entries = _audit_chain.get_entries(session_id=target_id, limit=limit, offset=offset)
+    total = _audit_chain.get_chain_length(session_id=target_id)
+    if total == 0:
+        agent = _proctoring_agents.get(session_id)
+        if agent and getattr(agent, "session_id", None) and agent.session_id != session_id:
+            target_id = agent.session_id
+            entries = _audit_chain.get_entries(session_id=target_id, limit=limit, offset=offset)
+            total = _audit_chain.get_chain_length(session_id=target_id)
+        else:
+            for ag in _proctoring_agents.values():
+                if getattr(ag, "session_id", None) == session_id:
+                    target_id = session_id
+                    break
+
     return jsonify({
         "status": "success",
         "session_id": session_id,
+        "resolved_session_id": target_id,
         "total_entries": total,
         "entries": [e.to_dict() for e in entries],
     })
@@ -2917,10 +3247,18 @@ def get_audit_chain(session_id: str):
 @app.route("/api/trace/audit-chain/<session_id>/verify", methods=["POST"])
 def verify_audit_chain(session_id: str):
     """Cryptographically verify the hash chain integrity for an exam session."""
-    is_valid, broken_sequence = _audit_chain.verify_integrity(session_id=session_id)
+    target_id = session_id
+    total = _audit_chain.get_chain_length(session_id=target_id)
+    if total == 0:
+        agent = _proctoring_agents.get(session_id)
+        if agent and getattr(agent, "session_id", None) and agent.session_id != session_id:
+            target_id = agent.session_id
+
+    is_valid, broken_sequence = _audit_chain.verify_integrity(session_id=target_id)
     return jsonify({
         "status": "success",
         "session_id": session_id,
+        "resolved_session_id": target_id,
         "is_intact": is_valid,
         "broken_at_sequence": broken_sequence,
         "verification_timestamp": time.time(),
