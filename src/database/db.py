@@ -333,19 +333,38 @@ class Database:
                       grading_details: Optional[Dict] = None) -> str:
         answer_id = str(uuid.uuid4())[:12]
         with self._write_lock:
-            self._conn.execute(
-                """INSERT INTO answers
-                   (answer_id, session_id, question_id, student_answer,
-                    score, max_score, grading_method, grading_details)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    answer_id, session_id, question_id, student_answer,
-                    score, max_score, grading_method,
-                    json.dumps(grading_details) if grading_details else None,
-                ),
-            )
-            self._conn.commit()
-        return answer_id
+            existing = self._conn.execute(
+                "SELECT answer_id FROM answers WHERE session_id = ? AND question_id = ?",
+                (session_id, question_id)
+            ).fetchone()
+            if existing:
+                self._conn.execute(
+                    """UPDATE answers SET student_answer = ?, score = coalesce(?, score),
+                       max_score = coalesce(?, max_score), grading_method = coalesce(?, grading_method),
+                       grading_details = coalesce(?, grading_details), submitted_at = datetime('now')
+                       WHERE session_id = ? AND question_id = ?""",
+                    (
+                        student_answer, score, max_score, grading_method,
+                        json.dumps(grading_details) if grading_details else None,
+                        session_id, question_id
+                    )
+                )
+                self._conn.commit()
+                return existing["answer_id"]
+            else:
+                self._conn.execute(
+                    """INSERT INTO answers
+                       (answer_id, session_id, question_id, student_answer,
+                        score, max_score, grading_method, grading_details)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        answer_id, session_id, question_id, student_answer,
+                        score, max_score, grading_method,
+                        json.dumps(grading_details) if grading_details else None,
+                    ),
+                )
+                self._conn.commit()
+                return answer_id
 
     def get_answers(self, session_id: str) -> List[Dict[str, Any]]:
         rows = self._conn.execute(

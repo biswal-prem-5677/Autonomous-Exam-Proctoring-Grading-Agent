@@ -314,23 +314,53 @@ def create_exam():
     )
     exam.topic = data.get("topic", "")
     exam.difficulty = data.get("difficulty", "medium")
+    exam.instructions = data.get("instructions", "")
+    exam.passing_score = float(data.get("passing_score", 40.0))
+    settings = dict(data.get("settings", {}) or {})
+    for k in ["policy", "require_webcam", "require_microphone", "require_fullscreen",
+              "allow_calculator", "open_book", "max_tab_switches", "risk_threshold",
+              "start_window", "end_window"]:
+        if k in data and k not in settings:
+            settings[k] = data[k]
+    exam.settings = settings
+    if "is_released" in data:
+        exam.is_released = bool(data["is_released"])
 
     # Add questions if provided in the creation request
     for qd in data.get("questions", []):
+        meta = dict(qd.get("metadata", {}) or {})
+        for field in ["formula", "governing_formula", "formula_hint", "variables", "expected_variables",
+                      "required_params", "final_value", "units", "language", "starter_code",
+                      "function_name", "target_function", "entry_function_name", "tests",
+                      "test_cases", "hidden_tests", "edge_cases", "model_answer", "reference_answer", "rubric"]:
+            if field in qd and field not in meta:
+                meta[field] = qd[field]
         exam.add_question(
             qtype=qd.get("type", "mcq"),
             text=qd.get("text", ""),
             options=qd.get("options"),
             correct_answer=qd.get("correct_answer"),
             marks=float(qd.get("marks", 1.0)),
-            tolerance=float(qd.get("tolerance", 0.01)),
+            tolerance=float(qd.get("tolerance", 0.01)) if qd.get("tolerance") is not None else None,
             keywords=qd.get("keywords", []),
+            topic=qd.get("topic", ""),
+            difficulty=qd.get("difficulty", "medium"),
+            metadata=meta,
         )
+
+    # Persist in SQLite
+    try:
+        _get_db().save_exam(exam.to_dict())
+    except Exception:
+        pass
 
     return jsonify({
         "exam_id": exam.exam_id,
         "title": exam.title,
         "duration_minutes": exam.duration_minutes,
+        "instructions": exam.instructions,
+        "passing_score": exam.passing_score,
+        "settings": exam.settings,
         "question_count": len(exam.questions),
         "total_marks": sum(q.marks for q in exam.questions),
         "status": "created",
@@ -348,6 +378,10 @@ def get_exam(exam_id):
         "duration_minutes": exam.duration_minutes,
         "topic": exam.topic,
         "difficulty": exam.difficulty,
+        "instructions": getattr(exam, "instructions", ""),
+        "passing_score": getattr(exam, "passing_score", 40.0),
+        "is_released": getattr(exam, "is_released", False),
+        "settings": getattr(exam, "settings", {}),
         "questions": [q.to_dict() for q in exam.questions],
         "question_count": len(exam.questions),
         "total_marks": sum(q.marks for q in exam.questions),
@@ -360,18 +394,30 @@ def add_question(exam_id):
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
     data = request.get_json(force=True)
+    meta = dict(data.get("metadata", {}) or {})
+    for field in ["formula", "governing_formula", "formula_hint", "variables", "expected_variables",
+                  "required_params", "final_value", "units", "language", "starter_code",
+                  "function_name", "target_function", "entry_function_name", "tests",
+                  "test_cases", "hidden_tests", "edge_cases", "model_answer", "reference_answer", "rubric"]:
+        if field in data and field not in meta:
+            meta[field] = data[field]
+
     q = exam.add_question(
         qtype=data.get("type", "mcq"),
         text=data.get("text", ""),
         options=data.get("options"),
         correct_answer=data.get("correct_answer"),
-        marks=data.get("marks", 1.0),
+        marks=float(data.get("marks", 1.0)),
         keywords=data.get("keywords", []),
-        tolerance=data.get("tolerance"),
+        tolerance=float(data.get("tolerance")) if data.get("tolerance") is not None else None,
         topic=data.get("topic", ""),
         difficulty=data.get("difficulty", "medium"),
-        metadata=data.get("metadata", {}),
+        metadata=meta,
     )
+    try:
+        _get_db().save_exam(exam.to_dict())
+    except Exception:
+        pass
     return jsonify({"question": q.to_dict(), "status": "added"})
 
 
@@ -384,18 +430,30 @@ def add_questions_bulk(exam_id):
     questions_data = data.get("questions", [])
     added = []
     for qd in questions_data:
+        meta = dict(qd.get("metadata", {}) or {})
+        for field in ["formula", "governing_formula", "formula_hint", "variables", "expected_variables",
+                      "required_params", "final_value", "units", "language", "starter_code",
+                      "function_name", "target_function", "entry_function_name", "tests",
+                      "test_cases", "hidden_tests", "edge_cases", "model_answer", "reference_answer", "rubric"]:
+            if field in qd and field not in meta:
+                meta[field] = qd[field]
         q = exam.add_question(
             qtype=qd.get("type", "mcq"),
             text=qd.get("text", ""),
             options=qd.get("options"),
             correct_answer=qd.get("correct_answer"),
-            marks=qd.get("marks", 1.0),
+            marks=float(qd.get("marks", 1.0)),
             keywords=qd.get("keywords", []),
-            tolerance=qd.get("tolerance"),
+            tolerance=float(qd.get("tolerance")) if qd.get("tolerance") is not None else None,
             topic=qd.get("topic", ""),
             difficulty=qd.get("difficulty", "medium"),
+            metadata=meta,
         )
         added.append(q.to_dict())
+    try:
+        _get_db().save_exam(exam.to_dict())
+    except Exception:
+        pass
     return jsonify({"questions": added, "count": len(added)})
 
 
@@ -511,6 +569,43 @@ def create_session():
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
 
+    db = _get_db()
+    # 1. Authoritative Release Enforcement
+    is_released = getattr(exam, "is_released", False)
+    db_exam = db.get_exam(exam_id)
+    if db_exam:
+        is_released = is_released or db_exam.get("is_released", False)
+    is_preview = data.get("is_preview", False) or request.headers.get("X-Preview-Mode") == "true"
+    if not is_released and not is_preview:
+        return jsonify({
+            "error": "This exam has not been released or published by the examiner yet.",
+            "status": "not_released"
+        }), 403
+
+    # 2. Authoritative Student Eligibility & Roster Enforcement
+    if not is_preview and not db.is_student_enrolled(exam_id, student_id):
+        return jsonify({
+            "error": f"Student '{student_id}' is not enrolled in the roster for this exam.",
+            "status": "not_enrolled"
+        }), 403
+
+    # 3. Schedule Window and Extra Time Accommodations
+    enrollment = db.get_student_enrollment(exam_id, student_id)
+    if enrollment:
+        extra_time = int(enrollment.get("extra_time_mins", 0) or 0)
+        duration = duration + extra_time
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if enrollment.get("start_window") and now_iso < enrollment["start_window"]:
+            return jsonify({
+                "error": f"Exam access window has not opened yet. Starts at {enrollment['start_window']}",
+                "status": "window_not_started"
+            }), 403
+        if enrollment.get("end_window") and now_iso > enrollment["end_window"]:
+            return jsonify({
+                "error": f"Exam access window closed at {enrollment['end_window']}",
+                "status": "window_closed"
+            }), 403
+
     controller = _exam_manager.get_or_create_controller(
         student_id, exam_id, duration
     )
@@ -619,6 +714,17 @@ def submit_answer(student_id, exam_id):
 
     controller = session_info["controller"]
     controller.submit_answer(question_id, answer)
+
+    # Persist to SQLite for durability
+    try:
+        sid = session_info.get("session_id", "")
+        _get_db().record_answer(
+            session_id=sid,
+            question_id=str(question_id),
+            student_answer=str(answer) if answer is not None else "",
+        )
+    except Exception:
+        pass  # best-effort DB save; in-memory is the authoritative copy during exam
 
     # Update knowledge tracer
     kt = _knowledge_tracers.get(session_key)
@@ -2926,7 +3032,7 @@ def examiner_submissions():
 
 @app.route("/api/student/results", methods=["GET"])
 def student_results_api():
-    """Get results for the current student."""
+    """Get results for the current student (strictly release-gated; zero risk exposure)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if not user:
@@ -2934,21 +3040,28 @@ def student_results_api():
 
     student_id = user.get("username", user.get("user_id", ""))
     results = []
+    db = _get_db()
 
     # Find exams this student has taken
     for skey, agent in _proctoring_agents.items():
         parts = skey.split(":")
         if len(parts) >= 1 and (parts[0] == student_id or parts[0] == user.get("user_id", "")):
             exam_id = parts[1] if len(parts) > 1 else ""
-            status = agent.get_status()
-
-            session_info = _active_sessions.get(skey)
-            answers = {}
-            if session_info and session_info.get("controller") and session_info["controller"].session:
-                answers = session_info["controller"].session.answers
 
             exam = _exam_manager.get_exam(exam_id)
             if exam:
+                is_rel = getattr(exam, "is_released", False)
+                db_exam = db.get_exam(exam_id)
+                if db_exam:
+                    is_rel = is_rel or db_exam.get("is_released", False)
+                if not is_rel:
+                    continue  # Hidden until published
+
+                session_info = _active_sessions.get(skey)
+                answers = {}
+                if session_info and session_info.get("controller") and session_info["controller"].session:
+                    answers = session_info["controller"].session.answers
+
                 ref_answers = {}
                 for q in exam.questions:
                     if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
@@ -2962,7 +3075,8 @@ def student_results_api():
                     "total_max": grade_results.get("total_max", 0.0),
                     "percentage": grade_results.get("percentage", 0.0),
                     "answered": len(answers),
-                    "risk_score": status.get("current_risk", 0.0),
+                    "is_released": True,
+                    "status": "released",
                     "submitted_at": datetime.now().isoformat(),
                 })
 
@@ -2971,7 +3085,7 @@ def student_results_api():
 
 @app.route("/api/student/results/<exam_id>", methods=["GET"])
 def student_result_detail(exam_id):
-    """Get detailed results for a specific exam."""
+    """Get detailed results for a specific exam (enforcing release gate)."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if not user:
@@ -2980,6 +3094,18 @@ def student_result_detail(exam_id):
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
+
+    db = _get_db()
+    is_rel = getattr(exam, "is_released", False)
+    db_exam = db.get_exam(exam_id)
+    if db_exam:
+        is_rel = is_rel or db_exam.get("is_released", False)
+    if not is_rel:
+        return jsonify({
+            "error": "Exam results have not been released by the examiner yet.",
+            "is_released": False,
+            "status": "pending_release"
+        }), 403
 
     # Find student's session
     student_id = user.get("username", user.get("user_id", ""))

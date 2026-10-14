@@ -227,6 +227,10 @@ class API {
         return this.get('/analytics');
     }
 
+    static async getKnowledgeState(studentId, examId) {
+        return this.get(`/knowledge-state/${encodeURIComponent(studentId)}/${encodeURIComponent(examId)}`);
+    }
+
     // ── Training & ML ────────────────────────────────────────────
     static async generateTrainingData(data) {
         return this.post('/train/generate-data', data);

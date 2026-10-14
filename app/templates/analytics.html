@@ -329,15 +329,35 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadCurrentSessionAnalytics() {
-    // Check if there are any active sessions to display
     try {
         const exams = await API.listExams();
-        if (exams.count > 0) {
-            const overview = await API.getExamOverview(exams.exams[0].exam_id);
-            // Generate mock analytics from completed students
-            const completed = overview.students.filter(s => s.progress >= 100);
+        if (exams && exams.count > 0) {
+            const examId = exams.exams[0].exam_id;
+            const overview = await API.getExamOverview(examId);
+            const completed = (overview.students || []).filter(s => s.progress >= 100 || s.status === 'completed');
             if (completed.length > 0) {
-                renderMockAnalytics(completed[0]);
+                const student = completed[0];
+                const pct = student.score !== undefined && student.total ? (student.score / student.total) * 100 : (student.percentage || 0);
+                document.getElementById('pred-score').textContent = pct.toFixed(1) + '%';
+                let comp = 'Developing';
+                if (pct >= 90) comp = 'Expert';
+                else if (pct >= 75) comp = 'Proficient';
+                else if (pct >= 60) comp = 'Competent';
+                else if (pct >= 40) comp = 'Basic';
+                document.getElementById('pred-competency').textContent = comp;
+
+                // Attempt to fetch real knowledge state from server
+                try {
+                    const ks = await API.getKnowledgeState(student.student_id, examId);
+                    renderKnowledgeState({ mastery: ks.mastery || {} });
+                } catch (e) {
+                    renderKnowledgeState({});
+                }
+            } else {
+                document.getElementById('pred-score').textContent = 'N/A';
+                document.getElementById('pred-competency').textContent = 'Awaiting Submissions';
+                document.getElementById('topic-mastery').innerHTML = '<div class="empty-panel" style="padding: 20px;">No completed exam sessions yet.</div>';
+                renderKnowledgeState({});
             }
         }
     } catch (e) {
@@ -363,8 +383,8 @@ function renderAnalytics(data) {
         Object.entries(data.per_question).forEach(([qid, q]) => {
             const topic = q.metadata?.topic || 'General';
             if (!topics[topic]) topics[topic] = { total: 0, score: 0 };
-            topics[topic].total += q.max_score;
-            topics[topic].score += q.score;
+            topics[topic].total += q.max_score || 0;
+            topics[topic].score += q.score || 0;
         });
     }
 
@@ -392,46 +412,34 @@ function renderAnalytics(data) {
     renderKnowledgeState(data);
 }
 
-function renderMockAnalytics(student) {
-    const pct = 75 + Math.random() * 20;
-    document.getElementById('pred-score').textContent = pct.toFixed(1) + '%';
-    document.getElementById('pred-competency').textContent = 'Proficient';
-
-    const topics = [
-        { name: 'Mathematics', mastery: 0.85 },
-        { name: 'Physics', mastery: 0.72 },
-        { name: 'Algebra', mastery: 0.90 },
-        { name: 'Geometry', mastery: 0.68 },
-        { name: 'Calculus', mastery: 0.78 },
-        { name: 'Biology', mastery: 0.55 },
-    ];
-
-    document.getElementById('topic-mastery').innerHTML = topics.map(t => {
-        const cls = t.mastery >= 0.7 ? 'success' : t.mastery >= 0.4 ? 'warning' : 'danger';
-        return `
-            <div class="topic-bar">
-                <span class="topic-name">${escapeHtml(t.name)}</span>
-                <div class="topic-track">
-                    <div class="topic-fill" style="width: ${t.mastery * 100}%; background: var(--accent-${cls})"></div>
-                </div>
-                <span class="topic-value">${(t.mastery * 100).toFixed(0)}%</span>
-            </div>
-        `;
-    }).join('');
-
-    renderKnowledgeState({});
-}
-
 function renderKnowledgeState(data) {
     const knowledgeGrid = document.getElementById('knowledge-grid');
-    const topics = [
-        { name: 'Arithmetic', mastery: 0.88 },
-        { name: 'Algebra', mastery: 0.75 },
-        { name: 'Geometry', mastery: 0.62 },
-        { name: 'Calculus', mastery: 0.70 },
-        { name: 'Physics', mastery: 0.55 },
-        { name: 'Biology', mastery: 0.45 },
-    ];
+    const masteryData = data.mastery || data.knowledge_state;
+    let topics = [];
+
+    if (masteryData && Object.keys(masteryData).length > 0) {
+        topics = Object.entries(masteryData).map(([name, m]) => ({
+            name: name,
+            mastery: typeof m === 'number' ? m : (m.mastery || 0)
+        }));
+    } else if (data.per_question) {
+        const topicScores = {};
+        Object.values(data.per_question).forEach(q => {
+            const topic = q.metadata?.topic || 'General';
+            if (!topicScores[topic]) topicScores[topic] = { score: 0, max: 0 };
+            topicScores[topic].score += q.score || 0;
+            topicScores[topic].max += q.max_score || 1;
+        });
+        topics = Object.entries(topicScores).map(([name, s]) => ({
+            name: name,
+            mastery: s.max > 0 ? s.score / s.max : 0
+        }));
+    }
+
+    if (!topics || topics.length === 0) {
+        knowledgeGrid.innerHTML = '<div style="grid-column: 1/-1; color: var(--text-muted); font-size: 13px; text-align: center; padding: 24px;">No knowledge state telemetry recorded yet.</div>';
+        return;
+    }
 
     knowledgeGrid.innerHTML = topics.map(t => {
         const cls = t.mastery >= 0.7 ? 'success' : t.mastery >= 0.4 ? 'warning' : 'danger';

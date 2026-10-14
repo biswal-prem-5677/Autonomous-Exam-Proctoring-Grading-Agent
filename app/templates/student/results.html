@@ -137,7 +137,7 @@
                     </div>
                     <div>
                         <div style="font-size:12px;color:var(--text-muted);">Integrity Status</div>
-                        <div style="font-size:16px;font-weight:600;color:var(--success);padding-top:3px;">Verified & Intact</div>
+                        <div style="font-size:16px;font-weight:600;color:${r.integrity_status === 'flagged' ? 'var(--danger)' : 'var(--success)'};padding-top:3px;">${r.integrity_status === 'flagged' ? '⚠️ Under Review' : r.integrity_status === 'cleared' ? '✅ Verified & Intact' : '📤 Submitted'}</div>
                     </div>
                 </div>
                 <div class="progress-bar">

@@ -482,8 +482,18 @@ const App = {
     },
 
     submitAnswer(questionId, answer) {
+        // Always cache locally first
         if (this.examSession) {
             this.examSession.answers[questionId] = answer;
+        }
+        // POST to server for real persistence
+        const session = this.examSession;
+        if (session && session.studentId && session.examId) {
+            fetch(`${window.API_BASE || '/api'}/exam-sessions/${encodeURIComponent(session.studentId)}/${encodeURIComponent(session.examId)}/answers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question_id: questionId, answer }),
+            }).catch(err => console.warn('[autosave] Server save failed:', err));
         }
     },
 

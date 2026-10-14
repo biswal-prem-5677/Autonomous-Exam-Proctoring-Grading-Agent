@@ -67,6 +67,10 @@ def test_full_browser_to_examiner_lifecycle(client):
     r = client.post("/api/exams", data=json.dumps(exam_payload), content_type="application/json")
     assert r.status_code == 200, f"Create exam failed: {r.data}"
 
+    # Examiner releases exam for student cohort
+    r_rel = client.post(f"/api/exams/{exam_id}/release", data=json.dumps({"is_released": True}), content_type="application/json")
+    assert r_rel.status_code == 200
+
     # ── Step 2: Student Preflight Check ──────────────────────────────────────
     # Proves Bug 1 is resolved: exam_id and student_id are properly supplied and preflight passes
     preflight_payload = {
