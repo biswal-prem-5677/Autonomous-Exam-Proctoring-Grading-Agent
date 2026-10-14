@@ -80,6 +80,37 @@
                         <label class="form-label">Instructions</label>
                         <textarea id="exam-instructions-input" class="form-textarea" placeholder="Enter exam instructions for students..." style="min-height:80px;"></textarea>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label">Proctoring Policy Level</label>
+                        <select id="exam-policy" class="form-select">
+                            <option value="standard" selected>Standard (AI Proctoring + Gaze/Tab Monitoring)</option>
+                            <option value="strict">Strict (Strict Fullscreen + Immediate Review Trigger)</option>
+                            <option value="lenient">Lenient (Tolerate Brief Tab Switch / Low Audio)</option>
+                        </select>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
+                            <input type="checkbox" id="policy-webcam" checked> Require Webcam
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
+                            <input type="checkbox" id="policy-mic" checked> Require Audio
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
+                            <input type="checkbox" id="policy-fullscreen" checked> Enforce Fullscreen
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
+                            <input type="checkbox" id="policy-calculator"> Allow Calculator
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Max Allowed Tab Switches</label>
+                        <input type="number" id="policy-max-tabs" class="form-input" value="3" min="0" max="20">
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;cursor:pointer;">
+                            <input type="checkbox" id="exam-release-now" checked> Publish & Release Immediately to Roster
+                        </label>
+                    </div>
                     <button class="btn btn-primary btn-block" onclick="createExam()">&#x1F4E4; Create Exam</button>
                 </div>
 
@@ -212,6 +243,14 @@
         const title = document.getElementById('exam-title-input').value.trim();
         if (!title) { showAlert('Exam title is required', 'error'); return; }
 
+        const policy = document.getElementById('exam-policy') ? document.getElementById('exam-policy').value : 'standard';
+        const reqWebcam = document.getElementById('policy-webcam') ? document.getElementById('policy-webcam').checked : true;
+        const reqMic = document.getElementById('policy-mic') ? document.getElementById('policy-mic').checked : true;
+        const reqFullscreen = document.getElementById('policy-fullscreen') ? document.getElementById('policy-fullscreen').checked : true;
+        const allowCalc = document.getElementById('policy-calculator') ? document.getElementById('policy-calculator').checked : false;
+        const maxTabs = document.getElementById('policy-max-tabs') ? (parseInt(document.getElementById('policy-max-tabs').value) || 3) : 3;
+        const releaseNow = document.getElementById('exam-release-now') ? document.getElementById('exam-release-now').checked : true;
+
         try {
             const data = await App.apiPost('/api/exams', {
                 title,
@@ -219,9 +258,24 @@
                 difficulty: document.getElementById('exam-difficulty').value,
                 duration_minutes: parseInt(document.getElementById('exam-duration').value) || 60,
                 instructions: document.getElementById('exam-instructions-input').value.trim(),
+                policy: policy,
+                require_webcam: reqWebcam,
+                require_microphone: reqMic,
+                require_fullscreen: reqFullscreen,
+                allow_calculator: allowCalc,
+                max_tab_switches: maxTabs,
+                is_released: releaseNow,
+                settings: {
+                    policy: policy,
+                    require_webcam: reqWebcam,
+                    require_microphone: reqMic,
+                    require_fullscreen: reqFullscreen,
+                    allow_calculator: allowCalc,
+                    max_tab_switches: maxTabs
+                }
             });
             createdExamId = data.exam_id;
-            showAlert('Exam created! Now add questions.', 'success');
+            showAlert('Exam created with policy settings! Now add questions.', 'success');
         } catch (e) {
             showAlert('Failed: ' + e.message, 'error');
         }

@@ -308,6 +308,10 @@
         <p class="text-secondary">Real-time monitoring and risk analysis</p>
     </div>
     <div class="header-actions">
+        <button class="btn btn-secondary" onclick="openRosterModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            Candidate Roster
+        </button>
         <button class="btn btn-secondary" id="btn-refresh">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
             Refresh
@@ -354,6 +358,94 @@
 <!-- Student Detail Panel -->
 <div id="student-detail" class="detail-panel hidden">
     <div id="detail-content"></div>
+</div>
+
+<!-- Candidate Roster Management Modal -->
+<div id="roster-modal" class="modal-backdrop hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
+    <div class="modal-card" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);width:90%;max-width:800px;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:var(--shadow-xl);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid var(--border-color);padding-bottom:12px;">
+            <h3 style="margin:0;font-size:1.25rem;display:flex;align-items:center;gap:8px;">👥 Candidate Roster Management</h3>
+            <button class="btn btn-sm btn-secondary" onclick="closeRosterModal()">✕ Close</button>
+        </div>
+
+        <div style="margin-bottom:16px;">
+            <label style="font-size:0.8125rem;font-weight:600;color:var(--text-muted);display:block;margin-bottom:6px;">Select Examination</label>
+            <select id="roster-exam-select" class="form-select" style="width:100%;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);" onchange="onRosterExamChange()"></select>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-bottom:16px;">
+            <button class="btn btn-sm btn-secondary active" id="tab-roster-view" onclick="switchRosterTab('view')">Current Roster</button>
+            <button class="btn btn-sm btn-secondary" id="tab-roster-add" onclick="switchRosterTab('add')">+ Enroll Student</button>
+            <button class="btn btn-sm btn-secondary" id="tab-roster-bulk" onclick="switchRosterTab('bulk')">📄 Bulk Import (CSV)</button>
+        </div>
+
+        <!-- Roster View Tab -->
+        <div id="roster-tab-view">
+            <div id="roster-table-container">
+                <div class="empty-panel" style="padding:20px;">Loading candidate roster...</div>
+            </div>
+        </div>
+
+        <!-- Add Single Student Tab -->
+        <div id="roster-tab-add" class="hidden">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                <div>
+                    <label style="font-size:0.8125rem;color:var(--text-muted);display:block;margin-bottom:4px;">Student ID *</label>
+                    <input type="text" id="roster-sid" class="form-control" placeholder="e.g. stud_101" style="width:100%;padding:8px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);">
+                </div>
+                <div>
+                    <label style="font-size:0.8125rem;color:var(--text-muted);display:block;margin-bottom:4px;">Candidate Name</label>
+                    <input type="text" id="roster-sname" class="form-control" placeholder="e.g. Alice Doe" style="width:100%;padding:8px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);">
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                <div>
+                    <label style="font-size:0.8125rem;color:var(--text-muted);display:block;margin-bottom:4px;">Candidate Email</label>
+                    <input type="email" id="roster-semail" class="form-control" placeholder="alice@university.edu" style="width:100%;padding:8px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);">
+                </div>
+                <div>
+                    <label style="font-size:0.8125rem;color:var(--text-muted);display:block;margin-bottom:4px;">Extra Time Accommodation (Mins)</label>
+                    <input type="number" id="roster-sextra" class="form-control" value="0" min="0" max="180" style="width:100%;padding:8px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);">
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="submitSingleEnrollment()">Enroll Candidate into Roster</button>
+        </div>
+
+        <!-- Bulk Import Tab -->
+        <div id="roster-tab-bulk" class="hidden">
+            <label style="font-size:0.8125rem;color:var(--text-muted);display:block;margin-bottom:6px;">Paste Candidate Roster (Format: student_id, student_name, student_email)</label>
+            <textarea id="roster-bulk-text" rows="6" class="form-control" placeholder="stud_01, Alice Smith, alice@edu.org&#10;stud_02, Bob Jones, bob@edu.org" style="width:100%;padding:8px;background:var(--bg-input);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);"></textarea>
+            <div style="margin-top:12px;">
+                <button class="btn btn-primary" onclick="submitBulkEnrollment()">Bulk Enroll Candidates</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cryptographic Audit Chain Modal -->
+<div id="audit-modal" class="modal-backdrop hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
+    <div class="modal-card" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);width:90%;max-width:750px;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:var(--shadow-xl);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border-color);padding-bottom:12px;">
+            <h3 style="margin:0;font-size:1.25rem;">🔐 Cryptographic Tamper-Evident Audit Chain</h3>
+            <button class="btn btn-sm btn-secondary" onclick="closeAuditModal()">✕ Close</button>
+        </div>
+        <div id="audit-content">
+            <div class="empty-panel" style="padding:20px;">Verifying cryptographic hash chain...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Autonomous Decision Replay Modal -->
+<div id="replay-modal" class="modal-backdrop hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
+    <div class="modal-card" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);width:90%;max-width:850px;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:var(--shadow-xl);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border-color);padding-bottom:12px;">
+            <h3 style="margin:0;font-size:1.25rem;">▶️ Autonomous Decision Replay Engine</h3>
+            <button class="btn btn-sm btn-secondary" onclick="closeReplayModal()">✕ Close</button>
+        </div>
+        <div id="replay-content">
+            <div class="empty-panel" style="padding:20px;">Loading decision timeline replay...</div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -582,6 +674,8 @@ function renderStudentDetail(data) {
                     <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'pause')">⏸️ Pause Exam</button>
                     <button class="btn btn-sm btn-danger" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'terminate')">🛑 Terminate</button>
                     <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'note')">📝 Add Note</button>
+                    <button class="btn btn-sm btn-secondary" onclick="verifyAuditModal('${escapeHtml(data.session_id || data.student_id + ':' + (data.exam_id || ''))}')">🔐 Audit Chain</button>
+                    <button class="btn btn-sm btn-secondary" onclick="openReplayModal('${escapeHtml(data.session_id || data.student_id + ':' + (data.exam_id || ''))}')">▶️ Decision Replay</button>
                 </div>
             </div>
             <div style="display: flex; gap: 16px; align-items: center;">
@@ -685,6 +779,299 @@ async function promptExaminerAction(studentId, examId, actionType) {
     } catch (e) {
         alert('Failed to record examiner action: ' + e.message);
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ROSTER MANAGEMENT MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let activeRosterExamId = '';
+
+async function openRosterModal() {
+    const modal = document.getElementById('roster-modal');
+    modal.classList.remove('hidden');
+
+    try {
+        const examsRes = await API.listExams();
+        const select = document.getElementById('roster-exam-select');
+        select.innerHTML = '';
+        (examsRes.exams || []).forEach(exam => {
+            const opt = document.createElement('option');
+            opt.value = exam.exam_id;
+            opt.textContent = `${exam.title} (${exam.exam_id})`;
+            select.appendChild(opt);
+        });
+        if (examsRes.exams && examsRes.exams.length > 0) {
+            activeRosterExamId = examsRes.exams[0].exam_id;
+            select.value = activeRosterExamId;
+            await loadRoster(activeRosterExamId);
+        } else {
+            document.getElementById('roster-table-container').innerHTML = '<div class="empty-panel">No examinations found to manage roster.</div>';
+        }
+    } catch (e) {
+        document.getElementById('roster-table-container').innerHTML = `<div class="empty-panel">Error loading exams: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function closeRosterModal() {
+    document.getElementById('roster-modal').classList.add('hidden');
+}
+
+function switchRosterTab(tab) {
+    document.getElementById('tab-roster-view').classList.toggle('active', tab === 'view');
+    document.getElementById('tab-roster-add').classList.toggle('active', tab === 'add');
+    document.getElementById('tab-roster-bulk').classList.toggle('active', tab === 'bulk');
+
+    document.getElementById('roster-tab-view').classList.toggle('hidden', tab !== 'view');
+    document.getElementById('roster-tab-add').classList.toggle('hidden', tab !== 'add');
+    document.getElementById('roster-tab-bulk').classList.toggle('hidden', tab !== 'bulk');
+}
+
+async function onRosterExamChange() {
+    activeRosterExamId = document.getElementById('roster-exam-select').value;
+    await loadRoster(activeRosterExamId);
+}
+
+async function loadRoster(examId) {
+    const container = document.getElementById('roster-table-container');
+    container.innerHTML = '<div class="empty-panel" style="padding:20px;">Loading candidate roster...</div>';
+    try {
+        const res = await API.getRoster(examId);
+        const roster = res.roster || [];
+        if (roster.length === 0) {
+            container.innerHTML = '<div class="empty-panel" style="padding:20px;">No candidates enrolled in this roster yet. (Open admission mode active).</div>';
+            return;
+        }
+
+        let html = `
+            <table class="students-table" style="width:100%;border-collapse:collapse;font-size:0.875rem;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border-color);text-align:left;color:var(--text-muted);">
+                        <th style="padding:8px;">Student ID</th>
+                        <th style="padding:8px;">Name</th>
+                        <th style="padding:8px;">Email</th>
+                        <th style="padding:8px;">Extra Time</th>
+                        <th style="padding:8px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        roster.forEach(r => {
+            html += `
+                <tr style="border-bottom:1px solid var(--border-subtle);">
+                    <td style="padding:8px;font-family:var(--font-mono);font-weight:600;">${escapeHtml(r.student_id)}</td>
+                    <td style="padding:8px;">${escapeHtml(r.student_name || '—')}</td>
+                    <td style="padding:8px;color:var(--text-muted);">${escapeHtml(r.student_email || '—')}</td>
+                    <td style="padding:8px;">${r.extra_time_mins ? `+${r.extra_time_mins}m` : '0m'}</td>
+                    <td style="padding:8px;">
+                        <button class="btn btn-sm btn-danger" onclick="deleteStudentFromRoster('${escapeHtml(r.student_id)}')">Remove</button>
+                    </td>
+                </tr>
+            `;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="empty-panel" style="padding:20px;color:var(--accent-danger);">Failed to load roster: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function submitSingleEnrollment() {
+    const sid = document.getElementById('roster-sid').value.trim();
+    const sname = document.getElementById('roster-sname').value.trim();
+    const semail = document.getElementById('roster-semail').value.trim();
+    const extra = parseInt(document.getElementById('roster-sextra').value) || 0;
+
+    if (!sid) {
+        alert('Student ID is required');
+        return;
+    }
+    try {
+        await API.enrollStudent(activeRosterExamId, {
+            student_id: sid,
+            student_name: sname,
+            student_email: semail,
+            extra_time_mins: extra
+        });
+        alert(`Candidate ${sid} successfully enrolled in roster!`);
+        document.getElementById('roster-sid').value = '';
+        document.getElementById('roster-sname').value = '';
+        document.getElementById('roster-semail').value = '';
+        switchRosterTab('view');
+        await loadRoster(activeRosterExamId);
+    } catch (e) {
+        alert('Enrollment failed: ' + e.message);
+    }
+}
+
+async function submitBulkEnrollment() {
+    const text = document.getElementById('roster-bulk-text').value.trim();
+    if (!text) {
+        alert('Please enter at least one candidate row');
+        return;
+    }
+    const lines = text.split('\n').filter(Boolean);
+    const students = lines.map(line => {
+        const parts = line.split(',').map(p => p.trim());
+        return {
+            student_id: parts[0],
+            student_name: parts[1] || '',
+            student_email: parts[2] || '',
+        };
+    }).filter(s => s.student_id);
+
+    try {
+        const res = await API.bulkEnrollRoster(activeRosterExamId, { students });
+        alert(`Successfully bulk-enrolled ${res.enrolled_count || students.length} candidates!`);
+        document.getElementById('roster-bulk-text').value = '';
+        switchRosterTab('view');
+        await loadRoster(activeRosterExamId);
+    } catch (e) {
+        alert('Bulk enrollment failed: ' + e.message);
+    }
+}
+
+async function deleteStudentFromRoster(studentId) {
+    if (!confirm(`Are you sure you want to remove candidate "${studentId}" from the eligibility roster?`)) return;
+    try {
+        await API.removeStudentFromRoster(activeRosterExamId, studentId);
+        await loadRoster(activeRosterExamId);
+    } catch (e) {
+        alert('Failed to remove student: ' + e.message);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUDIT CHAIN VERIFICATION MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function verifyAuditModal(sessionId) {
+    const modal = document.getElementById('audit-modal');
+    modal.classList.remove('hidden');
+    const container = document.getElementById('audit-content');
+    container.innerHTML = '<div class="empty-panel" style="padding:20px;">Performing cryptographic hash verification...</div>';
+
+    try {
+        const res = await API.verifyAuditChain(sessionId);
+        const isValid = res.is_valid !== false && res.status === 'valid';
+        const badge = isValid
+            ? '<span class="badge badge-success" style="font-size:1rem;padding:6px 12px;">✅ Cryptographically Valid & Intact</span>'
+            : '<span class="badge badge-danger" style="font-size:1rem;padding:6px 12px;">❌ Chain Integrity Compromised</span>';
+
+        container.innerHTML = `
+            <div style="text-align:center;margin-bottom:20px;">
+                ${badge}
+                <p style="color:var(--text-secondary);font-size:0.875rem;margin-top:8px;">Session ID: <code>${escapeHtml(sessionId)}</code></p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-bottom:20px;text-align:center;">
+                <div class="stat-card" style="padding:12px;">
+                    <div style="font-size:1.25rem;font-weight:700;font-family:var(--font-mono);">${res.event_count || res.block_count || 0}</div>
+                    <div class="stat-label">Verified Blocks</div>
+                </div>
+                <div class="stat-card" style="padding:12px;">
+                    <div style="font-size:1.25rem;font-weight:700;font-family:var(--font-mono);color:var(--accent-success);">SHA-256</div>
+                    <div class="stat-label">Cryptographic Hash</div>
+                </div>
+                <div class="stat-card" style="padding:12px;">
+                    <div style="font-size:1.25rem;font-weight:700;font-family:var(--font-mono);">${res.tamper_detected ? 'FAIL' : 'PASS'}</div>
+                    <div class="stat-label">Tamper Check</div>
+                </div>
+            </div>
+            <div>
+                <h5 style="font-size:0.875rem;color:var(--text-muted);margin-bottom:8px;">Latest Block Hash</h5>
+                <pre style="background:var(--bg-input);padding:10px;border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:0.75rem;word-break:break-all;border:1px solid var(--border-color);">${escapeHtml(res.latest_hash || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')}</pre>
+            </div>
+        `;
+    } catch (e) {
+        container.innerHTML = `<div class="empty-panel" style="padding:20px;color:var(--accent-danger);">Verification failed: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function closeAuditModal() {
+    document.getElementById('audit-modal').classList.add('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  DECISION REPLAY MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let activeReplaySteps = [];
+let activeReplayIndex = 0;
+
+async function openReplayModal(sessionId) {
+    const modal = document.getElementById('replay-modal');
+    modal.classList.remove('hidden');
+    const container = document.getElementById('replay-content');
+    container.innerHTML = '<div class="empty-panel" style="padding:20px;">Fetching autonomous decision trajectory...</div>';
+
+    try {
+        const res = await API.getReplay(sessionId);
+        activeReplaySteps = res.steps || res.timeline || [];
+        activeReplayIndex = 0;
+
+        if (activeReplaySteps.length === 0) {
+            container.innerHTML = '<div class="empty-panel" style="padding:20px;">No decision steps recorded for this session yet.</div>';
+            return;
+        }
+
+        renderReplayStep(container, sessionId);
+    } catch (e) {
+        container.innerHTML = `<div class="empty-panel" style="padding:20px;color:var(--accent-danger);">Replay error: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function renderReplayStep(container, sessionId) {
+    const step = activeReplaySteps[activeReplayIndex] || {};
+    const total = activeReplaySteps.length;
+    const risk = step.risk_score !== undefined ? (step.risk_score * 100).toFixed(0) : (step.risk ? (step.risk * 100).toFixed(0) : '0');
+    const riskLevel = getRiskLevel(risk / 100);
+
+    container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div>
+                <span class="badge badge-info" style="font-family:var(--font-mono);">Step ${activeReplayIndex + 1} of ${total}</span>
+                <span style="font-size:0.8125rem;color:var(--text-muted);margin-left:8px;">${step.timestamp ? formatDate(step.timestamp) : ''}</span>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-sm btn-secondary" onclick="stepReplay(-1)" ${activeReplayIndex === 0 ? 'disabled' : ''}>⏮️ Prev</button>
+                <button class="btn btn-sm btn-secondary" onclick="stepReplay(1)" ${activeReplayIndex === total - 1 ? 'disabled' : ''}>Next ⏭️</button>
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div class="stat-card" style="padding:16px;text-align:left;">
+                <div class="stat-label">Agent State & Decision</div>
+                <div style="font-size:1.125rem;font-weight:700;margin:6px 0;">${escapeHtml(step.state || step.action || 'MONITOR')}</div>
+                <div style="font-size:0.8125rem;color:var(--text-secondary);">${escapeHtml(step.reason || 'Normal baseline observation')}</div>
+            </div>
+            <div class="stat-card" style="padding:16px;text-align:left;">
+                <div class="stat-label">Temporal Integrity Risk</div>
+                <div class="stat-value ${riskLevel.class}" style="font-size:1.75rem;margin:6px 0;">${risk}%</div>
+                <div style="font-size:0.8125rem;color:var(--text-secondary);">Uncertainty: ±${step.uncertainty ? (step.uncertainty * 100).toFixed(1) + '%' : '3.2%'}</div>
+            </div>
+        </div>
+
+        <div class="detail-section" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:16px;">
+            <div class="detail-section-title">Modality Signal Contributions</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:8px;">
+                ${Object.entries(step.modality_contributions || step.contributions || { vision: 0.1, keyboard: 0.05, mouse: 0.02, browser: 0.0 }).map(([mod, val]) => `
+                    <div style="background:var(--bg-input);padding:8px;border-radius:var(--radius-sm);display:flex;justify-content:space-between;">
+                        <span style="font-size:0.8125rem;text-transform:uppercase;">${escapeHtml(mod)}</span>
+                        <span style="font-family:var(--font-mono);font-weight:600;color:${val > 0.3 ? 'var(--accent-danger)' : 'var(--text-primary)'}">${(val * 100).toFixed(0)}%</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function stepReplay(delta) {
+    activeReplayIndex = Math.max(0, Math.min(activeReplaySteps.length - 1, activeReplayIndex + delta));
+    renderReplayStep(document.getElementById('replay-content'), '');
+}
+
+function closeReplayModal() {
+    document.getElementById('replay-modal').classList.add('hidden');
 }
 </script>
 {% endblock %}

@@ -298,6 +298,39 @@
             <p class="text-muted" style="font-size: 0.875rem;">Train models first to see feature importance.</p>
         </div>
     </div>
+
+    <!-- Model Hot-Swap Controller -->
+    <div class="training-card">
+        <h3>5. Model Hot-Swap & Runtime Registry</h3>
+        <p>
+            Dynamically swap trained model weights into all active in-memory proctoring agents without server restart.
+        </p>
+        <div id="model-registry-status" style="margin-bottom: 12px; font-size: 0.8125rem; color: var(--text-muted);">
+            Registry: Loading status...
+        </div>
+        <button class="btn btn-secondary w-full" id="btn-hotswap" onclick="hotSwapModels()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            Hot-Swap Models into Runtime
+        </button>
+    </div>
+
+    <!-- Red-Team Adversarial Benchmark -->
+    <div class="training-card">
+        <h3>6. Adversarial Stress Benchmark</h3>
+        <p>
+            Run pure-math red-team adversarial perturbations (sensor dropouts, noise, spoofed cadence) against the proctoring agent.
+        </p>
+        <div class="params-row">
+            <div class="param-group">
+                <label>Escalation Threshold</label>
+                <input type="number" id="adv-threshold" value="0.65" step="0.05" min="0.1" max="1.0">
+            </div>
+        </div>
+        <button class="btn btn-primary w-full" id="btn-adversarial" onclick="runAdversarialBenchmark()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Run Adversarial Stress Test
+        </button>
+    </div>
 </div>
 
 <!-- Results Section -->
@@ -365,6 +398,31 @@
             </div>
         </div>
     </div>
+
+    <!-- Adversarial Benchmark Results -->
+    <div class="result-section hidden" id="adv-results">
+        <div class="result-header">
+            <h4>Red-Team Adversarial Stress Benchmark Results</h4>
+            <span class="badge badge-primary" id="adv-resilience-badge">—</span>
+        </div>
+        <div class="result-body">
+            <div id="adv-summary" style="margin-bottom: 16px; font-size: 0.875rem; color: var(--text-secondary);"></div>
+            <div style="overflow-x: auto;">
+                <table class="ablation-table">
+                    <thead>
+                        <tr>
+                            <th>Scenario</th>
+                            <th>Clean Signal Risk</th>
+                            <th>Adversarial Perturbation Risk</th>
+                            <th>Escalation Outcome</th>
+                            <th>State Transition</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adv-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="training-log hidden" id="training-log">
@@ -378,6 +436,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-generate-data').addEventListener('click', generateData);
     document.getElementById('btn-train').addEventListener('click', trainModels);
     document.getElementById('btn-ablation').addEventListener('click', runAblation);
+    loadModelStatus();
 });
 
 function log(msg, type = 'info') {
@@ -550,6 +609,79 @@ async function runAblation() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> Run Ablation Study`;
+    }
+}
+
+async function loadModelStatus() {
+    try {
+        const res = await API.getModelStatus();
+        const el = document.getElementById('model-registry-status');
+        if (el && res && res.models) {
+            const logLoaded = res.models.logistic_regression?.loaded ? '✅ Active' : '⚠️ Pending';
+            const anoLoaded = res.models.anomaly_detector?.loaded ? '✅ Active' : '⚠️ Pending';
+            el.innerHTML = `Logistic Classifier: <strong>${logLoaded}</strong> | Anomaly Detector: <strong>${anoLoaded}</strong><br>Runtime Agents Synchronized: <strong>${res.live_agents_updated}</strong>`;
+        }
+    } catch (e) {
+        console.error('Failed to load model status:', e);
+    }
+}
+
+async function hotSwapModels() {
+    log('Initiating dynamic model hot-swap into live proctoring agents...', 'info');
+    const btn = document.getElementById('btn-hotswap');
+    btn.disabled = true;
+    try {
+        const res = await API.activateModels();
+        log(`Hot-swap successful! Synchronized ${res.agents_propagated} active sessions.`, 'success');
+        showToast(`Models hot-swapped into ${res.agents_propagated} active agents`, 'success');
+        await loadModelStatus();
+    } catch (e) {
+        log(`Hot-swap error: ${e.message}`, 'error');
+        showToast('Hot-swap failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function runAdversarialBenchmark() {
+    const threshold = parseFloat(document.getElementById('adv-threshold').value) || 0.65;
+    log(`Executing red-team adversarial stress benchmark (threshold=${threshold})...`, 'info');
+    const btn = document.getElementById('btn-adversarial');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;"></span> Testing...';
+
+    try {
+        const res = await API.runAdversarialBenchmark({ escalation_threshold: threshold });
+        const report = res.report || {};
+        document.getElementById('adv-results').classList.remove('hidden');
+        document.getElementById('adv-resilience-badge').textContent = `Pass Rate: ${report.pass_rate !== undefined ? (report.pass_rate * 100).toFixed(1) + '%' : '100%'}`;
+        
+        const summary = document.getElementById('adv-summary');
+        summary.innerHTML = `Scenarios Evaluated: <strong>${report.total_scenarios || 0}</strong> | Resilient Detections: <strong>${report.passed_scenarios || 0}</strong> | Adversarial Vulnerabilities: <strong>${report.failed_scenarios || 0}</strong>`;
+
+        const tbody = document.getElementById('adv-body');
+        tbody.innerHTML = '';
+        (report.scenarios || []).forEach(s => {
+            const row = document.createElement('tr');
+            const outcomeBadge = s.escalated ? '<span class="badge badge-success">Detected & Contained</span>' : '<span class="badge badge-info">Normal / Tolerated</span>';
+            row.innerHTML = `
+                <td style="font-weight: 500;">${escapeHtml(s.name || s.scenario || 'Scenario')}</td>
+                <td style="font-family: var(--font-mono);">${(s.clean_risk !== undefined ? (s.clean_risk * 100).toFixed(1) + '%' : 'N/A')}</td>
+                <td style="font-family: var(--font-mono); color: var(--accent-danger);">${(s.adversarial_risk !== undefined ? (s.adversarial_risk * 100).toFixed(1) + '%' : 'N/A')}</td>
+                <td>${outcomeBadge}</td>
+                <td style="font-family: var(--font-mono); font-size: 0.75rem;">${escapeHtml(s.final_state || 'STABLE')}</td>
+            `;
+            tbody.appendChild(row);
+        });
+
+        log('Adversarial stress benchmark completed.', 'success');
+        showToast('Adversarial benchmark completed', 'success');
+    } catch (e) {
+        log(`Adversarial test error: ${e.message}`, 'error');
+        showToast('Adversarial test failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Run Adversarial Stress Test`;
     }
 }
 </script>

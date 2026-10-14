@@ -275,25 +275,25 @@ class RiskEngine:
 
             face_present = 0.0 if face_absent_cnt > 0 else 1.0
             face_conf = 0.1 if face_absent_cnt > 0 else 0.95
-            face_cnt = 2.0 if multi_face_cnt > 0 else (0.0 if face_absent_cnt > 0 else 1.0)
+            face_cnt = min(4.0, 2.0 if multi_face_cnt > 0 else (0.0 if face_absent_cnt > 0 else 1.0))
             absence_ratio = min(1.0, face_absent_cnt * 0.2)
-            head_yaw = 35.0 if event_counts.get("head_turned", 0) > 0 else 0.0
-            head_pitch = 25.0 if event_counts.get("gaze_away", 0) > 0 else 0.0
+            head_yaw = 0.6 if event_counts.get("head_turned", 0) > 0 else 0.0
+            head_pitch = 0.5 if event_counts.get("gaze_away", 0) > 0 else 0.0
             head_roll = 0.0
             audio_rms = 0.7 if loud_cnt > 0 else (0.4 if speech_cnt > 0 else 0.05)
-            audio_db = float(signal_summary.get("audio", 0.0))
+            audio_db = float(np.clip(float(signal_summary.get("audio", 0.0)), 0.0, 1.0))
             audio_zcr = 0.3 if speech_cnt > 0 else 0.05
             audio_thresh = 1.0 if (loud_cnt > 0 or speech_cnt > 0) else 0.0
             spectral_centroid = 0.5
             kb_idle = 1.0 if event_counts.get("idle_keyboard", 0) > 0 else 0.0
-            keystroke_rate = 2.5 if event_counts.get("rapid_typing", 0) > 0 else 1.0
+            keystroke_rate = 0.8 if event_counts.get("rapid_typing", 0) > 0 else 0.4
             key_hold = 0.12
-            key_lat = 0.18
-            mouse_spd = 2.5 if event_counts.get("rapid_movement", 0) > 0 else 0.6
-            mouse_dist = 1.0
-            click_rate = 0.4
+            key_lat = 0.10
+            mouse_spd = 0.8 if event_counts.get("rapid_movement", 0) > 0 else 0.3
+            mouse_dist = 0.3
+            click_rate = 0.1
             mouse_idle = 1.0 if event_counts.get("idle_mouse", 0) > 0 else 0.0
-            multi_events = float(multi_face_cnt)
+            multi_events = min(1.0, float(multi_face_cnt) / 5.0)
             progress = min(1.0, float(signal_summary.get("temporal", 0.1)))
 
             features = [

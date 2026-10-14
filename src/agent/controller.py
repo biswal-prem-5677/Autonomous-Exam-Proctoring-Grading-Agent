@@ -428,8 +428,8 @@ class ProctoringAgent:
             try:
                 proba = self._logistic_model.predict_proba(features.reshape(1, -1))[0]
                 predictions["logistic_risk"] = float(proba)
-            except Exception:
-                pass
+            except Exception as e:
+                predictions["ml_error"] = str(e)
 
         # Anomaly detection
         if self._anomaly_model is not None and features is not None:
@@ -437,8 +437,8 @@ class ProctoringAgent:
                 score = self._anomaly_model.score(features.reshape(1, -1))
                 predictions["anomaly_score"] = float(score[0])
                 predictions["anomaly_detected"] = bool(score[0] > 0.5)
-            except Exception:
-                pass
+            except Exception as e:
+                predictions["anomaly_error"] = str(e)
 
         return predictions
 

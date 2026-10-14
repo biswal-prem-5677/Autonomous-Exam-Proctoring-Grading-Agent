@@ -230,7 +230,7 @@ class TestGradingOrchestrator:
                      text=str(q["text"]), options=q.get("options"),  # type: ignore
                      correct_answer=q.get("correct_answer"),
                      marks=float(q.get("marks", 1.0)), keywords=list(q.get("keywords", [])),  # type: ignore
-                     tolerance=float(q.get("tolerance", 0.02)))
+                     tolerance=float(str(q.get("tolerance") or 0.02)))
             for q in SAMPLE_QUESTIONS
         ]
         orchestrator = GradingOrchestrator()
@@ -245,7 +245,7 @@ class TestGradingOrchestrator:
                      text=str(q["text"]), options=q.get("options"),  # type: ignore
                      correct_answer=q.get("correct_answer"),
                      marks=float(q.get("marks", 1.0)), keywords=list(q.get("keywords", [])),  # type: ignore
-                     tolerance=float(q.get("tolerance", 0.02)))
+                     tolerance=float(str(q.get("tolerance") or 0.02)))
             for q in SAMPLE_QUESTIONS
         ]
         orchestrator = GradingOrchestrator()
@@ -887,7 +887,7 @@ class TestEndToEndDemo:
                      text=str(q["text"]), options=q.get("options"),  # type: ignore
                      correct_answer=q.get("correct_answer"),
                      marks=float(q.get("marks", 1.0)), keywords=list(q.get("keywords", [])),  # type: ignore
-                     tolerance=float(q.get("tolerance", 0.02)))
+                     tolerance=float(str(q.get("tolerance") or 0.02)))
             for q in SAMPLE_QUESTIONS
         ]
 

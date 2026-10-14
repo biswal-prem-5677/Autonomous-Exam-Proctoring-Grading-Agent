@@ -252,7 +252,8 @@ def test_api_audit_chain_resolution(client):
 
 def test_api_exam_roster_and_release(client):
     exam_id = f"exam_{uuid.uuid4().hex[:8]}"
-    client.post("/api/exams", json={"title": "Roster Exam", "duration_minutes": 45})
+    create_res = client.post("/api/exams", json={"exam_id": exam_id, "title": "Roster Exam", "duration_minutes": 45})
+    assert create_res.status_code == 200
 
     # Enroll single student
     r1 = client.post(f"/api/exams/{exam_id}/roster", json={
@@ -344,3 +345,137 @@ def test_api_predict_performance_insufficient_data(client):
     data = res.get_json()
     assert data["status"] == "insufficient_data"
     assert data["prediction"] is None
+
+
+# ── Security: Preview Mode Authorization Gate ────────────────────────────────
+
+def test_security_preview_authorization_gate(client):
+    from app.api.server import _get_auth_db
+    auth_db = _get_auth_db()
+
+    # Create an unreleased exam
+    exam_id = f"exam_sec_unrel_{uuid.uuid4().hex[:6]}"
+    create_res = client.post("/api/exams", json={
+        "exam_id": exam_id,
+        "title": "Unreleased Test Exam",
+        "duration_minutes": 30,
+        "is_released": False,
+        "questions": [{"type": "mcq", "text": "Q1", "options": ["A", "B"], "correct_answer": "A", "marks": 1}],
+    })
+    assert create_res.status_code == 200
+
+    # 1. Unauthenticated client attempting preview mode -> 403 unauthorized_preview
+    unauth_prev = client.post("/api/exam-sessions", json={
+        "exam_id": exam_id,
+        "student_id": "anon_attacker",
+        "is_preview": True,
+    })
+    assert unauth_prev.status_code == 403
+    assert unauth_prev.get_json()["error"] == "unauthorized_preview"
+
+    # 2. Ordinary student attempting preview mode with header or flag -> 403 unauthorized_preview
+    stud_uid = auth_db.create_user(f"stud_{uuid.uuid4().hex[:6]}", f"stud_{uuid.uuid4().hex[:6]}@school.edu", "Student One", "pass123", role="student")
+    stud_token = auth_db.create_session(stud_uid)
+
+    stud_prev = client.post("/api/exam-sessions",
+                            json={"exam_id": exam_id, "student_id": "stud_1", "is_preview": True},
+                            headers={"Authorization": f"Bearer {stud_token}"})
+    assert stud_prev.status_code == 403
+    assert stud_prev.get_json()["error"] == "unauthorized_preview"
+
+    # 3. Authenticated examiner attempting preview mode -> 200 OK preview allowed
+    exam_uid = auth_db.create_user(f"exam_{uuid.uuid4().hex[:6]}", f"exam_{uuid.uuid4().hex[:6]}@school.edu", "Examiner One", "pass123", role="examiner")
+    exam_token = auth_db.create_session(exam_uid)
+
+    exam_prev = client.post("/api/exam-sessions",
+                            json={"exam_id": exam_id, "student_id": "preview_reviewer", "is_preview": True},
+                            headers={"Authorization": f"Bearer {exam_token}"})
+    assert exam_prev.status_code == 200
+    assert exam_prev.get_json()["is_preview"] is True
+
+
+# ── Security: Student Session Isolation ─────────────────────────────────────
+
+def test_security_student_session_isolation(client):
+    from app.api.server import _get_auth_db
+    auth_db = _get_auth_db()
+
+    # Create users
+    stud1_uid = auth_db.create_user(f"alice_{uuid.uuid4().hex[:6]}", f"alice_{uuid.uuid4().hex[:6]}@school.edu", "Alice", "pass123", role="student")
+    stud2_uid = auth_db.create_user(f"bob_{uuid.uuid4().hex[:6]}", f"bob_{uuid.uuid4().hex[:6]}@school.edu", "Bob", "pass123", role="student")
+    tok1 = auth_db.create_session(stud1_uid)
+    tok2 = auth_db.create_session(stud2_uid)
+
+    # Create exam
+    eid = f"exam_iso_{uuid.uuid4().hex[:6]}"
+    client.post("/api/exams", json={
+        "exam_id": eid, "title": "Isolation Exam", "is_released": True,
+        "questions": [{"type": "mcq", "text": "Q1", "options": ["A", "B"], "correct_answer": "A", "marks": 1}]
+    })
+
+    # Enroll Alice in roster
+    client.post(f"/api/exams/{eid}/roster", json={"student_id": stud1_uid})
+
+    # Alice starts session
+    sess_res = client.post("/api/exam-sessions", json={"exam_id": eid, "student_id": stud1_uid},
+                           headers={"Authorization": f"Bearer {tok1}"})
+    assert sess_res.status_code == 200
+    session_id = sess_res.get_json()["session_id"]
+
+    # Bob attempts to submit answer to Alice's session -> 403 Forbidden
+    hack_ans = client.post("/api/answers", json={
+        "session_id": session_id, "question_id": "q1", "answer": "B"
+    }, headers={"Authorization": f"Bearer {tok2}"})
+    assert hack_ans.status_code == 403
+
+    # Bob attempts to finish Alice's session -> 403 Forbidden
+    hack_fin = client.post(f"/api/exam-sessions/{session_id}/finish",
+                           headers={"Authorization": f"Bearer {tok2}"})
+    assert hack_fin.status_code == 403
+
+    # Alice submits answer to her own session -> 200 OK
+    own_ans = client.post("/api/answers", json={
+        "session_id": session_id, "question_id": "q1", "answer": "A"
+    }, headers={"Authorization": f"Bearer {tok1}"})
+    assert own_ans.status_code == 200
+
+
+# ── Model Hot-Swap & Adversarial Benchmark APIs ──────────────────────────────
+
+def test_models_hot_swap_and_adversarial_apis(client):
+    # Test GET status
+    st = client.get("/api/models/status")
+    assert st.status_code == 200
+    data = st.get_json()
+    assert data["status"] == "success"
+    assert "active_agents_count" in data
+    assert "logistic_model" in data
+    assert "anomaly_model" in data
+
+    # Test POST activate hot-swap
+    act = client.post("/api/models/activate")
+    assert act.status_code == 200
+    act_data = act.get_json()
+    assert act_data["status"] == "success"
+    assert act_data["hot_swap_applied"] is True
+
+    # Test adversarial benchmark endpoint
+    adv = client.get("/api/ml/adversarial-benchmark")
+    assert adv.status_code == 200
+    adv_data = adv.get_json()
+    assert adv_data["status"] == "success"
+    assert "scenarios" in adv_data
+    assert "summary" in adv_data
+
+
+# ── Honest Performance Prediction Confidence Bounds ─────────────────────────
+
+def test_honest_performance_prediction_bounds(client):
+    # Endpoint returns model version and prediction bounds
+    res = client.get("/api/analytics/predict-performance?student_id=test_student_honest")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["status"] == "success"
+    assert "prediction_model_version" in data
+    assert "prediction_interval" in data
+    assert data["prediction_interval"]["confidence_level"] == 0.95

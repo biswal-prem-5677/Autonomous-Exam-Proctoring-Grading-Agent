@@ -46,7 +46,11 @@ class LinearRegressionScratch:
 
 
 class PerformancePredictor:
-    """Wrapper for performance prediction using ensemble methods."""
+    """Reference standalone ensemble regression implementation.
+
+    NOTE: The authoritative production model used by API server routes and database
+    analytics is `src.prediction.performance.PerformancePredictor`.
+    """
 
     def __init__(self, n_estimators: int = 100, max_depth: int = 10):
         self.model = RandomForestRegressor(

@@ -231,22 +231,27 @@
     </div>
 </div>
 
-<!-- Prediction Cards -->
-<div class="prediction-grid" id="prediction-section">
+<!-- Prediction & Performance Metrics Grid -->
+<div class="prediction-grid" id="prediction-section" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));">
+    <div class="prediction-card">
+        <div class="prediction-value" id="actual-score">—</div>
+        <div class="prediction-label">Actual Observed Score</div>
+        <div class="prediction-range" id="actual-basis">Graded from student submissions</div>
+    </div>
     <div class="prediction-card">
         <div class="prediction-value" id="pred-score">—</div>
         <div class="prediction-label">Predicted Final Score</div>
-        <div class="prediction-range">Based on partial progress</div>
+        <div class="prediction-range" id="pred-interval">PerformancePredictor (Ensemble RF)</div>
     </div>
     <div class="prediction-card">
         <div class="prediction-value" id="pred-time">—</div>
         <div class="prediction-label">Expected Completion Time</div>
-        <div class="prediction-range">Based on current pace</div>
+        <div class="prediction-range" id="pred-time-basis">Based on current response pace</div>
     </div>
     <div class="prediction-card">
         <div class="prediction-value" id="pred-competency">—</div>
         <div class="prediction-label">Competency Level</div>
-        <div class="prediction-range">Topic mastery estimate</div>
+        <div class="prediction-range">KnowledgeTracer mastery estimate</div>
     </div>
 </div>
 
@@ -338,7 +343,37 @@ async function loadCurrentSessionAnalytics() {
             if (completed.length > 0) {
                 const student = completed[0];
                 const pct = student.score !== undefined && student.total ? (student.score / student.total) * 100 : (student.percentage || 0);
-                document.getElementById('pred-score').textContent = pct.toFixed(1) + '%';
+                
+                // 1. Authoritative Observed Score
+                const actualEl = document.getElementById('actual-score');
+                if (actualEl) actualEl.textContent = pct.toFixed(1) + '%';
+                const actualBasisEl = document.getElementById('actual-basis');
+                if (actualBasisEl) actualBasisEl.textContent = 'Calculated from completed student submission';
+
+                // 2. ML Performance Prediction with Confidence Intervals
+                try {
+                    const predRes = await API.predictPerformance({
+                        session_key: `${student.student_id}:${examId}`,
+                        student_id: student.student_id,
+                        features: [pct / 100, (student.progress || 100) / 100, 1.0]
+                    });
+                    if (predRes && predRes.status === 'success' && predRes.score !== null) {
+                        document.getElementById('pred-score').textContent = predRes.score.toFixed(1) + '%';
+                        const low = predRes.lower_bound !== undefined ? predRes.lower_bound.toFixed(1) + '%' : '';
+                        const high = predRes.upper_bound !== undefined ? predRes.upper_bound.toFixed(1) + '%' : '';
+                        document.getElementById('pred-interval').textContent = low && high 
+                            ? `95% CI: [${low}, ${high}] (${predRes.model_version || 'Ensemble RF'})`
+                            : (predRes.model_version || 'Ensemble RF + Linear');
+                    } else {
+                        document.getElementById('pred-score').textContent = 'Insufficient Data';
+                        document.getElementById('pred-interval').textContent = predRes?.message || 'Requires >= 3 graded submissions';
+                    }
+                } catch (e) {
+                    document.getElementById('pred-score').textContent = 'Uncalibrated';
+                    document.getElementById('pred-interval').textContent = 'Model awaiting training calibration';
+                }
+
+                // 3. Competency Level
                 let comp = 'Developing';
                 if (pct >= 90) comp = 'Expert';
                 else if (pct >= 75) comp = 'Proficient';
@@ -346,7 +381,7 @@ async function loadCurrentSessionAnalytics() {
                 else if (pct >= 40) comp = 'Basic';
                 document.getElementById('pred-competency').textContent = comp;
 
-                // Attempt to fetch real knowledge state from server
+                // 4. Knowledge State Telemetry
                 try {
                     const ks = await API.getKnowledgeState(student.student_id, examId);
                     renderKnowledgeState({ mastery: ks.mastery || {} });
@@ -354,7 +389,12 @@ async function loadCurrentSessionAnalytics() {
                     renderKnowledgeState({});
                 }
             } else {
-                document.getElementById('pred-score').textContent = 'N/A';
+                const actualEl = document.getElementById('actual-score');
+                if (actualEl) actualEl.textContent = 'N/A';
+                const actualBasisEl = document.getElementById('actual-basis');
+                if (actualBasisEl) actualBasisEl.textContent = 'No submissions yet';
+                document.getElementById('pred-score').textContent = 'Awaiting Data';
+                document.getElementById('pred-interval').textContent = 'Requires >= 3 graded submissions';
                 document.getElementById('pred-competency').textContent = 'Awaiting Submissions';
                 document.getElementById('topic-mastery').innerHTML = '<div class="empty-panel" style="padding: 20px;">No completed exam sessions yet.</div>';
                 renderKnowledgeState({});
@@ -367,7 +407,21 @@ async function loadCurrentSessionAnalytics() {
 
 function renderAnalytics(data) {
     const pct = data.percentage || 0;
-    document.getElementById('pred-score').textContent = pct.toFixed(1) + '%';
+    const actualEl = document.getElementById('actual-score');
+    if (actualEl) actualEl.textContent = pct.toFixed(1) + '%';
+    const actualBasisEl = document.getElementById('actual-basis');
+    if (actualBasisEl) actualBasisEl.textContent = 'Calculated from session results';
+
+    if (data.prediction && data.prediction.predicted_score !== undefined) {
+        const pScore = data.prediction.predicted_score;
+        document.getElementById('pred-score').textContent = pScore.toFixed(1) + '%';
+        const low = data.prediction.lower_bound !== undefined ? data.prediction.lower_bound.toFixed(1) + '%' : '';
+        const high = data.prediction.upper_bound !== undefined ? data.prediction.upper_bound.toFixed(1) + '%' : '';
+        document.getElementById('pred-interval').textContent = low && high ? `95% CI: [${low}, ${high}]` : 'Regression estimate';
+    } else {
+        document.getElementById('pred-score').textContent = 'Uncalibrated';
+        document.getElementById('pred-interval').textContent = 'No trained prediction weights';
+    }
 
     // Estimate competency
     let comp = 'Developing';

@@ -337,11 +337,13 @@ def test_decision_replay_engine():
 
     # Step 0
     s0 = replay.current_step()
+    assert s0 is not None
     assert s0.step_index == 0
     assert s0.current_risk == 0.15
 
     # Step forward
     s1 = replay.step_forward()
+    assert s1 is not None
     assert s1.step_index == 1
     assert s1.current_risk == 0.62
     assert s1.agent_decision == "REVIEW_REQUIRED"

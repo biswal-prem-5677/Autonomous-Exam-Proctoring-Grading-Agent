@@ -1,6 +1,7 @@
-"""End-to-end browser-to-server lifecycle integration test.
+"""Full Client-to-Server HTTP Lifecycle Integration Test.
 
-Tests the full lifecycle as executed by the browser:
+Simulates the complete sequence of requests issued by the browser during an exam lifecycle
+via Flask's test_client (without headless browser subprocess):
 1. Exam creation (examiner)
 2. Preflight verification with exam_id and student_id
 3. Exam session start (POST /api/exam-sessions) creating server-side agent, controller, and evidence log

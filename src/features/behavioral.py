@@ -30,43 +30,80 @@ class BehavioralFeatureExtractor:
         """
         features = []
 
-        # Face features (4)
+        # 0: face_present — binary [0, 1]
         features.append(1.0 if signals.get("face_present", False) else 0.0)
-        features.append(signals.get("face_confidence", 0.0))
-        features.append(signals.get("face_count", 0) / 2.0)  # Normalize
-        features.append(self._face_absence_ratio())
 
-        # Head pose features (3)
+        # 1: face_confidence — float [0, 1]
+        features.append(float(np.clip(signals.get("face_confidence", 0.0), 0.0, 1.0)))
+
+        # 2: face_count — int/float [0, 4]
+        features.append(float(np.clip(signals.get("face_count", 1.0 if signals.get("face_present", False) else 0.0), 0.0, 4.0)))
+
+        # 3: absence_ratio — float [0, 1]
+        features.append(float(np.clip(self._face_absence_ratio(), 0.0, 1.0)))
+
+        # 4, 5, 6: Head pose angles normalized [-1, 1]
         head_pose = signals.get("head_pose", {}) or {}
-        features.append(abs(head_pose.get("yaw", 0)) / 90.0)
-        features.append(abs(head_pose.get("pitch", 0)) / 90.0)
-        features.append(abs(head_pose.get("roll", 0)) / 90.0)
+        features.append(float(np.clip(head_pose.get("yaw", 0.0) / 90.0, -1.0, 1.0)))
+        features.append(float(np.clip(head_pose.get("pitch", 0.0) / 90.0, -1.0, 1.0)))
+        features.append(float(np.clip(head_pose.get("roll", 0.0) / 90.0, -1.0, 1.0)))
 
-        # Audio features (5)
+        # 7: audio_rms — float [0, 1]
         audio = signals.get("audio_features", {}) or {}
-        features.append(audio.get("rms_energy", 0.0))
-        features.append(min(audio.get("volume_db", -100), 0.0) / 100.0)
-        features.append(audio.get("zero_crossing_rate", 0.0))
-        features.append(1.0 if audio.get("volume_db", -100) > -40 else 0.0)
-        features.append(audio.get("spectral_centroid", 0.0) / 8000.0)
+        features.append(float(np.clip(audio.get("rms_energy", 0.0), 0.0, 1.0)))
 
-        # Keyboard features (3)
-        features.append(signals.get("keyboard_idle_seconds", 0) / 120.0)
-        features.append(signals.get("keyboard_events_per_minute", 0) / 100.0)
-        features.append(1.0 if signals.get("keyboard_idle_seconds", 0) > 120 else 0.0)
+        # 8: audio_db — float [0, 1]
+        raw_db = audio.get("volume_db", -100.0)
+        features.append(float(np.clip((raw_db + 100.0) / 100.0, 0.0, 1.0)))
 
-        # Mouse features (4)
-        features.append(signals.get("mouse_avg_speed", 0) / 500.0)
-        features.append(signals.get("mouse_total_distance", 0) / 1000.0)
-        features.append(signals.get("mouse_click_count", 0) / 50.0)
-        features.append(signals.get("mouse_idle_seconds", 0) / 120.0)
+        # 9: audio_zcr — float [0, 1]
+        features.append(float(np.clip(audio.get("zero_crossing_rate", 0.0), 0.0, 1.0)))
 
-        # Multi-face events (1)
-        features.append(signals.get("multi_face_events", 0) / 10.0)
+        # 10: audio_threshold_flag — binary [0, 1]
+        features.append(1.0 if raw_db > -40.0 or signals.get("loud_audio", False) else 0.0)
 
-        # Temporal features (2)
-        features.append(signals.get("session_elapsed", 0) / 3600.0)
-        features.append(signals.get("total_events", 0) / 100.0)
+        # 11: spectral_centroid — float [0, 1]
+        features.append(float(np.clip(audio.get("spectral_centroid", 0.0) / 8000.0, 0.0, 1.0)))
+
+        # 12: keyboard_idle_flag — binary [0, 1]
+        kb_idle_sec = signals.get("keyboard_idle_seconds", 0)
+        features.append(1.0 if kb_idle_sec > 10.0 or signals.get("idle_keyboard", False) else 0.0)
+
+        # 13: keystroke_rate — float [0, 1]
+        kb_events_pm = signals.get("keyboard_events_per_minute", signals.get("typing_wpm", 0.0) * 5.0)
+        features.append(float(np.clip(kb_events_pm / 200.0, 0.0, 1.0)))
+
+        # 14: key_hold_mean — float [0, 1] (seconds)
+        raw_hold = signals.get("key_hold_mean", signals.get("mean_key_hold_ms", 120.0) / 1000.0)
+        features.append(float(np.clip(raw_hold / 0.5, 0.0, 1.0)))
+
+        # 15: key_latency_mean — float [0, 1] (seconds)
+        raw_lat = signals.get("key_latency_mean", signals.get("mean_latency_ms", 100.0) / 1000.0)
+        features.append(float(np.clip(raw_lat / 1.0, 0.0, 1.0)))
+
+        # 16: mouse_speed — float [0, 1]
+        mouse_spd = signals.get("mouse_avg_speed", signals.get("mouse_velocity", 0.0))
+        features.append(float(np.clip(mouse_spd / 500.0, 0.0, 1.0)))
+
+        # 17: mouse_distance — float [0, 1]
+        mouse_dist = signals.get("mouse_total_distance", 0.0)
+        features.append(float(np.clip(mouse_dist / 2000.0, 0.0, 1.0)))
+
+        # 18: click_rate — float [0, 1]
+        clicks = signals.get("mouse_click_count", signals.get("mouse_clicks", 0.0))
+        features.append(float(np.clip(clicks / 50.0, 0.0, 1.0)))
+
+        # 19: mouse_idle_flag — binary [0, 1]
+        mouse_idle_sec = signals.get("mouse_idle_seconds", 0)
+        features.append(1.0 if mouse_idle_sec > 10.0 or signals.get("idle_mouse", False) else 0.0)
+
+        # 20: multi_face_events — float [0, 1]
+        features.append(float(np.clip(signals.get("multi_face_events", 0) / 5.0, 0.0, 1.0)))
+
+        # 21: session_progress — float [0, 1]
+        dur = max(1.0, float(signals.get("session_duration", 3600.0)))
+        prog = signals.get("session_progress", signals.get("session_elapsed", 0.0) / dur)
+        features.append(float(np.clip(prog, 0.0, 1.0)))
 
         return np.array(features, dtype=np.float64)
 

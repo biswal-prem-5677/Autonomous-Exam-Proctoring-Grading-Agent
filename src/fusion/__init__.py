@@ -16,7 +16,7 @@ P(E_1) × (1 + (n-1) × correlation_factor × avg_reliability)
 import numpy as np
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict, is_dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 from enum import Enum
 
 
@@ -31,7 +31,7 @@ class ModalitySource(Enum):
 
 @dataclass
 class CorroborationSignal:
-    modality: ModalitySource
+    modality: Union[ModalitySource, str]
     event_type: str
     severity: float
     confidence: float

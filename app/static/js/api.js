@@ -252,6 +252,14 @@ class API {
         return this.post('/ml/adversarial-benchmark', data);
     }
 
+    static async getModelStatus() {
+        return this.get('/models/status');
+    }
+
+    static async activateModels() {
+        return this.post('/models/activate', {});
+    }
+
     // ── Replay & Audit Chain ─────────────────────────────────────
     static async getReplay(sessionId, step = null) {
         const query = step !== null ? `?step=${step}` : '';

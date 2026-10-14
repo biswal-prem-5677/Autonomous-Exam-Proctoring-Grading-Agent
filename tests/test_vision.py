@@ -90,6 +90,7 @@ class TestLandmarkAnalyzer:
         from src.vision.landmarks import LandmarkAnalyzer
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_CENTERED_FACE))
+        assert result is not None
         assert abs(result["gaze_horizontal"]) < 0.1
         assert not result["looking_away"]
 
@@ -98,6 +99,7 @@ class TestLandmarkAnalyzer:
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_LOOKING_LEFT))
         # h_offset = (0.38 - 0.50) / 0.24 = -0.50 → looking_left = True
+        assert result is not None
         assert result["looking_left"]
         assert result["looking_away"]
 
@@ -106,6 +108,7 @@ class TestLandmarkAnalyzer:
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_LOOKING_RIGHT))
         # h_offset = (0.63 - 0.50) / 0.24 = 0.54 → looking_right = True
+        assert result is not None
         assert result["looking_right"]
         assert result["looking_away"]
 
@@ -119,18 +122,21 @@ class TestLandmarkAnalyzer:
         from src.vision.landmarks import LandmarkAnalyzer
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_CENTERED_FACE))
+        assert result is not None
         assert 0 < result["avg_ear"] < 1.0
 
     def test_mouth_openness(self):
         from src.vision.landmarks import LandmarkAnalyzer
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_CENTERED_FACE))
+        assert result is not None
         assert "mouth_openness" in result
 
     def test_blink_rate_starts_zero(self):
         from src.vision.landmarks import LandmarkAnalyzer
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_CENTERED_FACE))
+        assert result is not None
         assert result["blink_rate"] == 0.0
 
     def test_reset_clears_history(self):
@@ -147,6 +153,7 @@ class TestLandmarkAnalyzer:
         analyzer = LandmarkAnalyzer()
         result = analyzer.analyze(_landmark_list(_CENTERED_FACE))
         # face_height=0.27, face_width=0.24 → ratio ≈ 1.125
+        assert result is not None
         assert result["face_aspect_ratio"] > 0.5
 
     def test_too_few_landmarks_returns_none(self):

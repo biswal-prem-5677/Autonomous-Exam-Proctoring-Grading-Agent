@@ -56,7 +56,7 @@ class LandmarkAnalyzer:
     def __init__(self):
         self._ear_history: List[float] = []
 
-    def analyze(self, landmarks: List[Tuple[float, float]]) -> Optional[Dict]:
+    def analyze(self, landmarks: Optional[List[Tuple[float, float]]]) -> Optional[Dict]:
         """Analyze facial landmarks and return geometric features.
 
         Args:
