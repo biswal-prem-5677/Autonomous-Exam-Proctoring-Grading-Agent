@@ -468,3 +468,17 @@ class PlagiarismDetector:
         """Clear all submissions."""
         self._submissions.clear()
         self.lsh.clear()
+
+    def detect_plagiarism(
+        self,
+        submissions: Dict[str, str],
+        question_id: str = "q_general",
+        threshold: Optional[float] = None,
+    ) -> PlagiarismReport:
+        """Check plagiarism across a dictionary of {student_id: answer_text}."""
+        self.clear()
+        if threshold is not None:
+            self.threshold = threshold
+        for student_id, text in submissions.items():
+            self.add_submission(student_id, question_id, str(text))
+        return self.detect(question_id)

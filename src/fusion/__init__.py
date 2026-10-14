@@ -15,8 +15,8 @@ P(E_1) × (1 + (n-1) × correlation_factor × avg_reliability)
 
 import numpy as np
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field, asdict, is_dataclass
+from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 
 
@@ -67,6 +67,19 @@ class CorroborationResult:
     uncorrelated_signals: List[Dict]
     contradictions: List[ContradictionRecord]
     explanation: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "signal_count": self.signal_count,
+            "independent_modalities": self.independent_modalities,
+            "temporal_window_seconds": self.temporal_window_seconds,
+            "corroboration_score": self.corroboration_score,
+            "corroboration_label": self.corroboration_label,
+            "correlated_group": self.correlated_group,
+            "uncorrelated_signals": self.uncorrelated_signals,
+            "contradictions": [asdict(c) if is_dataclass(c) else c for c in self.contradictions],
+            "explanation": self.explanation,
+        }
 
 
 # Corroboration base scores — Bayesian-inspired
@@ -159,11 +172,12 @@ def compute_corroboration(
     contradictions = _detect_contradictions(sorted_signals)
 
     # Find temporally-correlated groups
-    groups = _find_temporal_groups(sorted_signals, temporal_window)
+    groups: List[List[CorroborationSignal]] = _find_temporal_groups(sorted_signals, temporal_window)
 
     # Pick the largest correlated group as primary evidence cluster
+    primary_group: List[CorroborationSignal]
     if groups:
-        primary_group = max(groups, key=len)
+        primary_group = list(max(groups, key=len))
     else:
         primary_group = [sorted_signals[0]]
 
@@ -183,9 +197,9 @@ def compute_corroboration(
 
     # Adjust by modality reliability — Bayesian-inspired multiplier
     if unique_modalities:
-        avg_rel = np.mean([
+        avg_rel = float(np.mean([
             _MODALITY_RELIABILITY.get(m, 0.5) for m in unique_modalities
-        ])
+        ]))
         base_score = base_score * (0.6 + 0.4 * avg_rel)
 
     # Temporal spread: tighter grouping = higher confidence
@@ -223,7 +237,7 @@ def compute_corroboration(
         signal_count=len(sorted_signals),
         independent_modalities=independent_count,
         temporal_window_seconds=temporal_window,
-        corroboration_score=round(score, 4),
+        corroboration_score=float(round(score, 4)),
         corroboration_label=label,
         correlated_group=correlated,
         uncorrelated_signals=uncorrelated,
@@ -233,7 +247,7 @@ def compute_corroboration(
 
 
 
-def _find_temporal_groups(signals, window):
+def _find_temporal_groups(signals: List[CorroborationSignal], window: float) -> List[List[CorroborationSignal]]:
     """Group signals within the temporal window of the group's first signal."""
     if len(signals) <= 1:
         return [signals] if signals else []

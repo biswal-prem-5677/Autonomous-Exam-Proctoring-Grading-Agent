@@ -26,22 +26,25 @@ class FaceTracker:
 
         if MEDIAPIPE_AVAILABLE:
             try:
-                self._face_detection = mp.solutions.face_detection.FaceDetection(
-                    model_selection=0, min_detection_confidence=confidence_threshold
-                )
-                self._face_mesh = mp.solutions.face_mesh.FaceMesh(
-                    static_image_mode=False,
-                    max_num_faces=2,
-                    refine_landmarks=True,
-                    min_detection_confidence=confidence_threshold,
-                    min_tracking_confidence=0.5,
-                )
-                self.use_mediapipe = True
+                solutions = getattr(mp, "solutions", None)
+                if solutions is not None and hasattr(solutions, "face_detection") and hasattr(solutions, "face_mesh"):
+                    self._face_detection = solutions.face_detection.FaceDetection(
+                        model_selection=0, min_detection_confidence=confidence_threshold
+                    )
+                    self._face_mesh = solutions.face_mesh.FaceMesh(
+                        static_image_mode=False,
+                        max_num_faces=2,
+                        refine_landmarks=True,
+                        min_detection_confidence=confidence_threshold,
+                        min_tracking_confidence=0.5,
+                    )
+                    self.use_mediapipe = True
             except Exception:
                 self.use_mediapipe = False
 
         if not self.use_mediapipe:
             import cv2
+            import cv2.data
             self._face_cascade = cv2.CascadeClassifier(
                 cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             )

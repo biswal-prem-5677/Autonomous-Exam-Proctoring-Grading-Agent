@@ -54,10 +54,10 @@ class LongAnswerGrader:
         self,
         student_answer: str,
         reference_answer: str,
-        keywords: List[str] = None,
+        keywords: Optional[List[str]] = None,
         marks: float = 10.0,
         question_text: str = "",
-        concept_weights: Dict[str, float] = None,
+        concept_weights: Optional[Dict[str, float]] = None,
     ) -> LongAnswerScore:
         """Grade a long-answer response.
 
@@ -172,9 +172,9 @@ class LongAnswerGrader:
         self,
         student_answers: Dict[str, str],
         reference_answers: Dict[str, str],
-        keywords_map: Dict[str, List[str]] = None,
-        marks_map: Dict[str, float] = None,
-        question_texts: Dict[str, str] = None,
+        keywords_map: Optional[Dict[str, List[str]]] = None,
+        marks_map: Optional[Dict[str, float]] = None,
+        question_texts: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Grade multiple long-answer questions."""
         keywords_map = keywords_map or {}
@@ -325,7 +325,7 @@ class DescriptiveGrader:
         self,
         question: Any,  # Question model
         student_answer: Any,
-        reference_answer: str = None,
+        reference_answer: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Grade a single question based on its type."""
         from src.grading.mcq import MCQGrader

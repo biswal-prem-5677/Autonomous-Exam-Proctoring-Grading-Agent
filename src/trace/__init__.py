@@ -595,8 +595,9 @@ def build_explainability_trace(
     # ── Counterfactuals: recompute risk from contributions ──
     counterfactuals = _compute_counterfactuals(current_risk, contributions, ml_risk)
 
+    dec_str = str(decision.value if hasattr(decision, 'value') else decision)
     decision_reason = _default_decision_reason(
-        decision.value if hasattr(decision, 'value') else decision,
+        dec_str,
         current_risk
     )
 
@@ -613,11 +614,11 @@ def build_explainability_trace(
         anomaly_score=round(anomaly_score, 4) if anomaly_score is not None else None,
         contributions=contributions,
         corroboration_result=corrob_dict,
-        confidence=confidence,
+        confidence=confidence if confidence is not None else 0.0,
         signal_agreement=modality_count,
         total_signals=signal_count,
         uncertainty_reason=uncertainty_reason,
-        decision=decision.value if hasattr(decision, 'value') else str(decision),
+        decision=dec_str,
         decision_reason=decision_reason,
         counterfactuals=counterfactuals,
         non_contributing=non_contributing,

@@ -96,13 +96,13 @@ class Exam:
     ):
         self.exam_id = exam_id or kwargs.get("id", "")
         self.title = title
-        self.duration_minutes = int(duration_minutes)
+        self.duration_minutes = duration_minutes
         self.questions = questions if questions is not None else []
         self.topic = topic
         self.difficulty = difficulty
         self.instructions = instructions
         self.passing_score = float(passing_score)
-        self.is_released = bool(is_released)
+        self.is_released = is_released
         self.settings = settings if settings is not None else {}
         self.created_at = created_at if created_at is not None else datetime.now()
 

@@ -226,11 +226,11 @@ class TestGradingOrchestrator:
 
     def test_full_pipeline_perfect(self):
         questions = [
-            Question(id=q["id"], type=QuestionType(q["type"]),
-                     text=q["text"], options=q.get("options"),
+            Question(id=str(q["id"]), type=QuestionType(q["type"]),
+                     text=str(q["text"]), options=q.get("options"),  # type: ignore
                      correct_answer=q.get("correct_answer"),
-                     marks=q.get("marks", 1.0), keywords=q.get("keywords", []),
-                     tolerance=q.get("tolerance", 0.02))
+                     marks=float(q.get("marks", 1.0)), keywords=list(q.get("keywords", [])),  # type: ignore
+                     tolerance=float(q.get("tolerance", 0.02)))
             for q in SAMPLE_QUESTIONS
         ]
         orchestrator = GradingOrchestrator()
@@ -241,11 +241,11 @@ class TestGradingOrchestrator:
 
     def test_full_pipeline_zero(self):
         questions = [
-            Question(id=q["id"], type=QuestionType(q["type"]),
-                     text=q["text"], options=q.get("options"),
+            Question(id=str(q["id"]), type=QuestionType(q["type"]),
+                     text=str(q["text"]), options=q.get("options"),  # type: ignore
                      correct_answer=q.get("correct_answer"),
-                     marks=q.get("marks", 1.0), keywords=q.get("keywords", []),
-                     tolerance=q.get("tolerance", 0.02))
+                     marks=float(q.get("marks", 1.0)), keywords=list(q.get("keywords", [])),  # type: ignore
+                     tolerance=float(q.get("tolerance", 0.02)))
             for q in SAMPLE_QUESTIONS
         ]
         orchestrator = GradingOrchestrator()
@@ -883,11 +883,11 @@ class TestEndToEndDemo:
         from src.agent.controller import ProctoringAgent
 
         questions = [
-            Question(id=q["id"], type=QuestionType(q["type"]),
-                     text=q["text"], options=q.get("options"),
+            Question(id=str(q["id"]), type=QuestionType(q["type"]),
+                     text=str(q["text"]), options=q.get("options"),  # type: ignore
                      correct_answer=q.get("correct_answer"),
-                     marks=q.get("marks", 1.0), keywords=q.get("keywords", []),
-                     tolerance=q.get("tolerance", 0.02))
+                     marks=float(q.get("marks", 1.0)), keywords=list(q.get("keywords", [])),  # type: ignore
+                     tolerance=float(q.get("tolerance", 0.02)))
             for q in SAMPLE_QUESTIONS
         ]
 

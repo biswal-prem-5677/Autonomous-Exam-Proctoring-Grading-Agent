@@ -1,6 +1,6 @@
 """Unified grading orchestrator — routes questions to appropriate graders."""
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from src.models.models import Question, QuestionType
 from src.grading.mcq import MCQGrader
 from src.grading.numerical import NumericalGrader
@@ -28,7 +28,7 @@ class GradingOrchestrator:
 
     def grade_all(self, questions: List[Question],
                   answers: Dict[str, Any],
-                  reference_answers: Dict[str, Any] = None) -> Dict[str, Any]:
+                  reference_answers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Grade all answers across all question types.
 
         Routes to:
@@ -65,7 +65,7 @@ class GradingOrchestrator:
 
     def grade_short_answer(self, questions: List[Question],
                            answers: Dict[str, Any],
-                           reference_answers: Dict[str, str] = None) -> Dict[str, Any]:
+                           reference_answers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Grade short-answer questions using TF-IDF + keyword coverage."""
         short_qs = [q for q in questions if q.type == QuestionType.SHORT_ANSWER]
         if not short_qs:
@@ -140,7 +140,7 @@ class GradingOrchestrator:
 
     def grade_long_answer(self, questions: List[Question],
                           answers: Dict[str, Any],
-                          reference_answers: Dict[str, str] = None) -> Dict[str, Any]:
+                          reference_answers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Grade long/descriptive answer questions using multi-signal scoring.
 
         Score = w1 * S_semantic + w2 * S_keyword + w3 * S_structure + w4 * S_coverage
@@ -197,7 +197,7 @@ class GradingOrchestrator:
 
     def grade_mathematical(self, questions: List[Question],
                            answers: Dict[str, Any],
-                           reference_answers: Dict[str, Any] = None) -> Dict[str, Any]:
+                           reference_answers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Grade multi-step mathematical derivation questions with partial credit."""
         math_qs = [q for q in questions if q.type == QuestionType.MATHEMATICAL]
         if not math_qs:
@@ -228,6 +228,12 @@ class GradingOrchestrator:
                 required_params = None
 
             final_val = ref_dict.get("final_value", q.correct_answer if isinstance(q.correct_answer, (int, float)) else meta.get("final_value"))
+            final_val_float: Optional[float] = None
+            if final_val is not None:
+                try:
+                    final_val_float = float(final_val)
+                except (ValueError, TypeError):
+                    final_val_float = None
             units = ref_dict.get("units", meta.get("units"))
             tolerance = q.tolerance if q.tolerance is not None else 0.02
 
@@ -235,7 +241,7 @@ class GradingOrchestrator:
                 student_solution=student_str,
                 expected_formula=expected_formula,
                 expected_variables=required_params,
-                expected_final_value=final_val,
+                expected_final_value=final_val_float,
                 expected_units=units,
                 marks=q.marks,
                 tolerance=tolerance,
@@ -265,7 +271,7 @@ class GradingOrchestrator:
 
     def grade_programming(self, questions: List[Question],
                           answers: Dict[str, Any],
-                          test_suites: Dict[str, List[Any]] = None) -> Dict[str, Any]:
+                          test_suites: Optional[Dict[str, List[Any]]] = None) -> Dict[str, Any]:
         """Grade programming questions with AST sandbox, vulnerability detection & execution."""
         prog_qs = [q for q in questions if q.type == QuestionType.PROGRAMMING]
         if not prog_qs:
