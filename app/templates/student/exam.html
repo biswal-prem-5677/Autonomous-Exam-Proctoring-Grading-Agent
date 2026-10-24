@@ -117,6 +117,27 @@
         </div>
     </div>
 
+    <!-- Examiner Warning Modal -->
+    <div id="warning-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:2000;align-items:center;justify-content:center;">
+        <div class="card" style="max-width:500px;margin:20px;border-left:4px solid var(--accent-warning, #eab308);">
+            <div class="card-header">
+                <div class="card-title" style="color:var(--accent-warning, #eab308);font-size:18px;">&#x26A0;&#xFE0F; Examiner Warning</div>
+            </div>
+            <p id="warning-modal-message" style="font-size:15px;line-height:1.6;margin:16px 0;"></p>
+            <div class="form-actions" style="justify-content:flex-end;">
+                <button class="btn btn-primary" onclick="document.getElementById('warning-modal').style.display='none';">Acknowledge</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exam Paused Overlay -->
+    <div id="paused-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.95);z-index:3000;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;">
+        <div style="font-size:64px;margin-bottom:16px;">&#x23F8;&#xFE0F;</div>
+        <h2 style="font-size:26px;font-weight:700;margin-bottom:8px;">Examination Paused</h2>
+        <p id="paused-overlay-message" style="font-size:16px;color:var(--text-secondary);max-width:550px;line-height:1.6;margin-bottom:20px;"></p>
+        <p style="font-size:14px;color:var(--text-muted);">Please wait for your examiner to resume the examination.</p>
+    </div>
+
     <script src="/static/js/app.js"></script>
     <script>
         App.currentUser = App.currentUser || {};
@@ -154,14 +175,20 @@
             },
         };
 
-        // Check camera
+        // Check camera & microphone
         try {
-            webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-            checks.camera_available = true;
-            const video = document.getElementById('webcam-preview');
-            video.srcObject = webcamStream;
+            webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }).catch(async () => {
+                return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            });
+            if (webcamStream) {
+                checks.camera_available = true;
+                checks.microphone_available = webcamStream.getAudioTracks().length > 0;
+                const video = document.getElementById('webcam-preview');
+                if (video) video.srcObject = webcamStream;
+                await App.initAudioCapture(webcamStream);
+            }
         } catch (e) {
-            console.warn('Camera not available:', e);
+            console.warn('Camera/mic not available:', e);
         }
 
         // Run preflight via API
@@ -243,7 +270,7 @@
                 questions = examData.questions;
             }
             document.getElementById('instructions-text').textContent =
-                'Complete all questions. Do not communicate with others or use unauthorized aids. You are being monitored via webcam.';
+                (examData && examData.instructions) ? examData.instructions : 'Complete all questions. Do not communicate with others or use unauthorized aids. You are being monitored.';
         } catch (e) {
             console.error('Failed to load exam:', e);
             document.getElementById('exam-title').textContent = 'Exam (offline mode)';
@@ -630,9 +657,11 @@
         const browserStats = App.getBrowserStats();
         const keyboardStats = App.getKeyboardStats();
         const mouseStats = App.getMouseStats();
+        const audioStats = App.getAudioStats();
 
         // Capture webcam frame for server-side vision analysis
         let facePresent = false, faceCount = 0, faceConfidence = 0.0, headPose = { yaw: 0, pitch: 0, roll: 0 };
+        let visionStatus = "NO_CAMERA";
         try {
             const examVideo = document.getElementById('exam-webcam');
             if (examVideo && examVideo.readyState >= 2) {
@@ -653,10 +682,16 @@
                     faceCount = visionResult.face_count;
                     faceConfidence = visionResult.face_confidence;
                     headPose = visionResult.head_pose || { yaw: 0, pitch: 0, roll: 0 };
+                    visionStatus = 'OK';
+                } else {
+                    visionStatus = visionResult ? (visionResult.vision_status || 'UNKNOWN') : 'UNKNOWN';
                 }
+            } else {
+                visionStatus = 'UNKNOWN';
             }
         } catch (e) {
             console.warn('Vision capture cycle:', e.message);
+            visionStatus = 'UNKNOWN';
         }
 
         // Send behavioral data to server agent for proctoring analysis
@@ -667,13 +702,71 @@
                 face_count: faceCount,
                 face_confidence: faceConfidence,
                 head_pose: headPose,
+                vision_status: visionStatus,
                 keyboard: keyboardStats,
                 mouse: mouseStats,
                 browser: browserStats,
+                audio_features: audioStats,
                 session_elapsed: elapsed,
             });
         } catch (e) {
             // Behavioral collection error handled silently
+        }
+
+        // Poll examiner interventions (warn, pause, resume, terminate)
+        try {
+            const statusRes = await App.apiGet(`/api/exam-sessions/${currentStudentId}/${currentExamId}/status`).catch(() => null);
+            if (statusRes && statusRes.is_paused) {
+                setExamPaused(true, "Your examiner has paused the examination.");
+            } else if (statusRes && statusRes.is_paused === false && window._isExamPaused) {
+                setExamPaused(false);
+            }
+
+            const actRes = await App.apiGet(`/api/examiner/actions/${sessionKey}`).catch(() => null);
+            const actions = (actRes && actRes.actions) ? actRes.actions : [];
+            if (actions.length > 0) {
+                const latest = actions[actions.length - 1];
+                if (latest.action_id && latest.action_id !== window._lastHandledActionId) {
+                    window._lastHandledActionId = latest.action_id;
+                    handleExaminerAction(latest);
+                }
+            }
+        } catch (actErr) {
+            console.warn('Action poll:', actErr.message);
+        }
+    }
+
+    function setExamPaused(paused, message) {
+        window._isExamPaused = !!paused;
+        const overlay = document.getElementById('paused-overlay');
+        const qArea = document.getElementById('question-area');
+        if (overlay) {
+            overlay.style.display = paused ? 'flex' : 'none';
+            if (message && document.getElementById('paused-overlay-message')) {
+                document.getElementById('paused-overlay-message').textContent = message;
+            }
+        }
+        if (qArea) {
+            qArea.style.pointerEvents = paused ? 'none' : 'auto';
+            qArea.style.opacity = paused ? '0.4' : '1.0';
+        }
+    }
+
+    function handleExaminerAction(act) {
+        const type = act.action_type;
+        const msg = act.message || 'Examiner intervention issued.';
+        if (type === 'warn') {
+            const modal = document.getElementById('warning-modal');
+            const msgEl = document.getElementById('warning-modal-message');
+            if (msgEl) msgEl.textContent = msg;
+            if (modal) modal.style.display = 'flex';
+        } else if (type === 'pause') {
+            setExamPaused(true, msg);
+        } else if (type === 'resume') {
+            setExamPaused(false);
+        } else if (type === 'terminate') {
+            alert(`EXAMINATION TERMINATED BY EXAMINER:\n${msg}`);
+            submitExam();
         }
     }
 

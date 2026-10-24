@@ -152,7 +152,7 @@
                 const stateClass = state === 'normal' ? 'success' : state === 'suspicious' ? 'warning' : 'danger';
                 const sk = s.session_key || s.session_id || '';
 
-                return `<div class="evidence-item" style="cursor:pointer;" onclick="showMonitorTab('evidence');document.getElementById('mon-reasoning-session')&&loadReasoningTrace('${sk}');">
+                return `<div class="evidence-item" style="cursor:pointer;" onclick="showMonitorTab('evidence');const sel=document.getElementById('mon-reasoning-session');if(sel){sel.value='${sk}';}loadReasoningTrace('${sk}');">
                     <div class="evidence-icon ${state === 'normal' ? 'info' : 'warning'}">
                         ${state === 'normal' ? '&#x2705;' : '&#x26A0;&#xFE0F;'}
                     </div>
@@ -221,8 +221,16 @@
                     else if (t.includes('tab') || t.includes('browser') || t.includes('fullscreen') || t.includes('window') || t.includes('focus')) modalities.add('Browser');
                     else modalities.add('Other');
                 });
-                const modCount = modalities.size || 1;
-                const confPct = { 1: 45, 2: 62, 3: 78, 4: 87, 5: 93, 6: 97 }[Math.min(modCount, 6)] || 45;
+                const modCount = modalities.size || 0;
+                let confPct = 0;
+                if (events.length > 0) {
+                    const avgConf = events.reduce((sum, e) => sum + (e.confidence || 0.8), 0) / events.length;
+                    confPct = Math.round(avgConf * 100);
+                } else if (statusResp.fusion_confidence) {
+                    confPct = Math.round(statusResp.fusion_confidence * 100);
+                } else {
+                    confPct = Math.round((1.0 - (risk || 0.0)) * 100);
+                }
                 corroborationHtml = `
                     <div class="grid-3 mt-2" style="gap:12px;">
                         <div style="background:var(--bg-secondary);border-radius:var(--radius);padding:12px;">

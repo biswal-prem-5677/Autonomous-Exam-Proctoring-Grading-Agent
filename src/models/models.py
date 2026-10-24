@@ -40,19 +40,21 @@ class Question:
     rubric: Optional[Dict[str, Any]] = None               # Optional rubric for grading
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, include_answer: bool = True) -> dict:
+        d = {
             "id": self.id,
-            "type": self.type.value,
+            "type": self.type.value if hasattr(self.type, "value") else str(self.type),
             "text": self.text,
             "options": self.options,
-            "correct_answer": self.correct_answer,
             "marks": self.marks,
-            "keywords": self.keywords,
             "tolerance": self.tolerance,
-            "rubric": self.rubric,
             "metadata": self.metadata,
         }
+        if include_answer:
+            d["correct_answer"] = self.correct_answer
+            d["keywords"] = self.keywords
+            d["rubric"] = self.rubric
+        return d
 
 
 @dataclass
@@ -111,7 +113,7 @@ class Exam:
         """Alias for exam_id for compatibility."""
         return self.exam_id
 
-    def to_dict(self) -> dict:
+    def to_dict(self, include_answers: bool = True) -> dict:
         return {
             "exam_id": self.exam_id,
             "id": self.exam_id,
@@ -124,7 +126,7 @@ class Exam:
             "is_released": self.is_released,
             "settings": self.settings,
             "created_at": self.created_at.isoformat() if hasattr(self.created_at, "isoformat") else str(self.created_at),
-            "questions": [q.to_dict() for q in self.questions],
+            "questions": [q.to_dict(include_answer=include_answers) for q in self.questions],
         }
 
     def add_question(self, qtype: str, text: str, **kwargs):

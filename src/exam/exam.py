@@ -90,6 +90,20 @@ class ExamController:
         if self.session_manager:
             self.session_manager.submit_answer(question_id, answer)
 
+    def pause_exam(self) -> None:
+        """Pause the exam session."""
+        if self.session_manager:
+            self.session_manager.pause()
+        if self.session:
+            self.session.is_paused = True
+
+    def resume_exam(self) -> None:
+        """Resume the paused exam session."""
+        if self.session_manager:
+            self.session_manager.resume()
+        if self.session:
+            self.session.is_paused = False
+
     def end_exam(self) -> Optional[ExamSession]:
         """End the exam session."""
         if self.session_manager:
@@ -116,6 +130,7 @@ class ExamController:
             "remaining_seconds": self.session_manager.get_remaining(),
             "events_count": len(self.session.events),
             "answers_count": len(self.session.answers),
+            "is_paused": getattr(self.session, "is_paused", False),
         }
 
 

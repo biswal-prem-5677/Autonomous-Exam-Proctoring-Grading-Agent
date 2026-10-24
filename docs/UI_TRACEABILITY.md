@@ -78,14 +78,18 @@ The system enforces strict role-based access control and psychological safety bo
 
 ---
 
-### 2.4 Examiner Interventions & Grade Override APIs
+### 2.4 Examiner Interventions, Grade Override & Release APIs
 
 | Route | Method | Target Role | UI Screen / Trigger | Backing `src/` Module | Status / Justification |
 |---|---|---|---|---|---|
-| `/api/examiner/action` | POST | Examiner | `examiner_dashboard.html` | `src.database.db.Database` | Executes live interventions: `warn`, `flag`, `pause`, `terminate`, `note`. |
+| `/api/examiner/action` | POST | Examiner | `examiner_dashboard.html` | `src.database.db.Database` | Executes live interventions: `warn`, `flag`, `pause`, `resume`, `terminate`, `note`. |
 | `/api/examiner/actions/<sid>` | GET | Examiner | `examiner_dashboard.html` | `src.database.db.Database` | Retrieves timeline of interventions applied to a student. |
 | `/api/grading/override` | POST | Examiner | `examiner/grading.html` | `src.database.db.Database` | Overrides automated question score with mandatory audit reason. |
 | `/api/grading/overrides/<sid>` | GET | Examiner | `examiner/grading.html` | `src.database.db.Database` | Lists all manual adjustments made for a candidate session. |
+| `/api/grading/release/<sid>/<eid>` | POST | Examiner | `examiner/grading.html` | `src.database.db.Database` | Releases grades for a specific student+exam pair; sets session state to `released`. |
+| `/api/student/appeal` | POST | Student | `student/results.html` (Appeal Modal) | `src.database.db.Database` | Records student grade appeal with reason for examiner review. |
+| `/api/student/results` | GET | Student | `student/results.html` | `src.grading.scorer.GradingOrchestrator` | Lists all released exam results for authenticated student. |
+| `/api/student/results/<eid>` | GET | Student | `student/results.html` | `src.grading.scorer.GradingOrchestrator` | Detailed per-question results with overrides applied; enforces release gate. |
 | `/api/evidence/<sid>` | GET | Examiner | `examiner_dashboard.html` | `src.agent.memory.EvidenceMemory` | Raw evidence entries for forensic inspection. |
 | `/api/evidence/<sid>/<eid>` | PUT | Examiner | `examiner_dashboard.html` | `src.reports.evidence.EvidenceLog` | Updates evidence status: `confirmed`, `dismissed`, `escalated`. |
 
@@ -214,9 +218,89 @@ Every public class in `src/` is enumerated below with its corresponding interfac
 
 ---
 
-## 4. Verification & Validation Summary
+## 4. Verified UI Component Hardening (Defect Fix Categories A–F)
+
+The following UI components were verified and hardened as part of defect fix categories A through F:
+
+### 4.1 Examiner Dashboard (`examiner_dashboard.html`)
+| Component | Fix Category | Description |
+|---|---|---|
+| Active Exam Selector | E | Dropdown in header selects active exam; triggers `onExamSelected(examId)` and `loadExamData(examId)`. |
+| `data-exam` attribute | E | Student cards carry real `exam_id` via `data-exam="${s.exam_id \|\| currentExamId}"`. |
+| `selectStudent()` | E | Globally defined `window.selectStudent(studentId, examId)` for student detail navigation. |
+| Auto-refresh timer | E | Polls active exam data every 10 seconds to reflect live session status. |
+| Resume Exam button | D | ▶️ Resume action wired to `/api/examiner/action` with `action_type="resume"`. |
+| AI Grading Explainability | E | Score breakdown displays grading method badges and confidence scores per question. |
+| Manual Override Badge | B | Questions with examiner overrides display `overridden: true` badge with reason. |
+
+### 4.2 Monitor Page (`monitor/index.html`)
+| Component | Fix Category | Description |
+|---|---|---|
+| Reasoning click-through | E | `mon-reasoning-session` select syncs correctly; clicking loads specific session trace. |
+| Cross-modal confirmation | E | Removed fake `{1: 45, 2: 62, ...}` lookup; now computes real confirmation from event confidences. |
+
+### 4.3 Student Exam Page (`student/exam.html`)
+| Component | Fix Category | Description |
+|---|---|---|
+| Delta telemetry | D | Sends `delta_tab_switches`, `delta_fullscreen_exits`, `delta_pastes`, `delta_copies`, `delta_cuts`. |
+| Camera status | D | Reports `vision_status` (e.g. `NO_CAMERA`) to suppress false `face_absent` anomalies. |
+| Timer enforcement | F | Duration set by server from exam config; client-supplied override ignored. |
+| Interventions overlay | D | Handles `warn`, `pause`, `resume`, `terminate` actions from examiner. |
+
+### 4.4 Student Results Page (`student/results.html`)
+| Component | Fix Category | Description |
+|---|---|---|
+| Grade release gate | B | Results only displayed when session state is `released` or exam `is_released` is true. |
+| Appeal modal | E | Button and modal hooked to `POST /api/student/appeal` with reason text field. |
+| Override display | B | Overridden scores displayed correctly with `overridden: true` flag and examiner reason. |
+
+---
+
+## 5. Auth & RBAC Route Security Matrix
+
+| Route Pattern | Anonymous | Student | Examiner | Admin | Enforcement Method |
+|---|---|---|---|---|---|
+| `/api/exam-sessions` (POST) | ❌ | ✅ (own ID only) | ✅ (preview) | ✅ | Token + role check + roster enrollment |
+| `/api/exam-sessions/<sid>/<eid>/status` | ✅ | ✅ (own only) | ✅ | ✅ | `_get_or_rebuild_controller` |
+| `/api/exam-sessions/<sid>/<eid>/answers` | ❌ | ✅ (own only) | ❌ | ❌ | `valid_ids` check against auth token |
+| `/api/exam-sessions/<sid>/<eid>/submit` | ❌ | ✅ (own only) | ❌ | ❌ | `valid_ids` check against auth token |
+| `/api/exams/<eid>` (GET) | ✅ | ✅ (no answers) | ✅ (with answers) | ✅ | `include_answer` toggle per role |
+| `/api/grading/override` | ❌ | ❌ | ✅ | ✅ | Token required |
+| `/api/grading/release/<sid>/<eid>` | ❌ | ❌ | ✅ | ✅ | Token required |
+| `/api/student/results/<eid>` | ❌ | ✅ (own, released) | ❌ | ❌ | Token + release gate |
+| `/api/student/appeal` | ❌ | ✅ | ❌ | ❌ | Token required |
+
+---
+
+## 6. Session Persistence & Restart Recovery
+
+| Table | Written At | Read At | Purpose |
+|---|---|---|---|
+| `sessions` | `create_session` (POST `/api/exam-sessions`) | `_get_or_rebuild_controller`, `_find_session_id`, `release_grades` | Authoritative session record; survives restart. |
+| `session_meta` | `create_session` | `_get_or_rebuild_controller` (fallback), `_recover_sessions_from_db` | Lightweight metadata for fast recovery. |
+| `answers` | `submit_answer`, `post_answer_unified` | `_load_answers_for_session`, `_get_or_rebuild_controller` | Per-question answer persistence. |
+| `grade_overrides` | `grade_override` | `_apply_grade_overrides`, `_grade_session_internal` | Examiner manual score adjustments. |
+
+---
+
+## 7. Test Traceability Matrix
+
+| Defect Category | Description | Test File(s) | Key Test Functions |
+|---|---|---|---|
+| **A. Auth/RBAC** | Correct answer stripping, session isolation, role enforcement | `test_defect_regressions.py`, `test_defect_fixes_comprehensive.py` | `test_student_cannot_see_correct_answers`, `test_security_student_session_isolation` |
+| **B. Wrong Grades** | Answer unwrapping, override persistence, release gating | `test_defect_fixes_comprehensive.py` | `test_answer_unwrapping_logic`, `test_server_restart_recovery_and_override_e2e` |
+| **C. Crashes after Restart** | Controller rebuild from SQLite, session_meta fallback | `test_defect_fixes_comprehensive.py` | `test_server_restart_recovery_and_override_e2e` |
+| **D. Proctoring Data Wiring** | Delta telemetry, vision status, interventions | `test_defect_fixes_comprehensive.py` | `test_behavioral_analyze_delta_and_vision_status`, `test_examiner_interventions_and_student_appeal` |
+| **E. UI Gaps** | Dashboard components, monitor reasoning, appeal modal | `test_defect_fixes_comprehensive.py`, `test_ui_e2e.py` | `test_examiner_interventions_and_student_appeal` |
+| **F. Logic & Quality** | Duration enforcement, keyword stuffing, paraphrase bonus | `test_defect_regressions.py` | `test_keyword_stuffing_defense`, `test_paraphrase_bonus`, `test_low_confidence_flagging` |
+
+---
+
+## 8. Verification & Validation Summary
 
 1. **Zero Unexplained Backend Gaps:** Every API route and public class is mapped either to an interactive browser screen or a documented backend proctoring/grading service.
 2. **Strict Psychological Safety Enforced:** Student templates (`student/exam.html`, `student/results.html`) contain zero risk percentages, integrity badges, or decision traces.
 3. **No Synthetic / Random Data in Production:** All calculations use real SQLite persistence, verified mathematical evaluations, or return explicit `"insufficient_data"` statuses.
-4. **Automated Test Validation:** 344/344 test cases verified passing with 100% test suite execution.
+4. **Automated Test Validation:** 353/353 test cases verified passing with 100% test suite execution (348 baseline + 5 comprehensive defect regression tests).
+5. **Session Persistence Verified:** Sessions survive server restart via dual-table persistence (`sessions` + `session_meta`) with controller rebuild and answer restoration.
+6. **Grade Override Pipeline Verified:** End-to-end flow from examiner override → DB storage → student result retrieval with correct score recalculation confirmed.

@@ -305,7 +305,12 @@
 <div class="dashboard-header">
     <div>
         <h1>Examiner Dashboard</h1>
-        <p class="text-secondary">Real-time monitoring and risk analysis</p>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+            <span class="text-secondary" style="font-size:0.875rem;">Active Exam:</span>
+            <select id="exam-select" class="form-control" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border-color);padding:4px 10px;border-radius:var(--radius-sm);font-weight:600;font-size:0.875rem;" onchange="onExamSelected(this.value)">
+                <option value="">Loading exams...</option>
+            </select>
+        </div>
     </div>
     <div class="header-actions">
         <button class="btn btn-secondary" onclick="openRosterModal()">
@@ -454,9 +459,14 @@
 let currentFilter = 'all';
 let allStudents = [];
 let selectedStudent = null;
+let currentExamId = '';
+
+window.selectStudent = function(studentId, examId) {
+    showStudentDetail(studentId, examId || currentExamId);
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
-    document.getElementById('btn-refresh').addEventListener('click', loadDashboard);
+    document.getElementById('btn-refresh').addEventListener('click', () => loadDashboard(true));
 
     // Filter buttons
     document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -469,10 +479,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     await loadDashboard();
+
+    // Auto-refresh every 10 seconds for live proctoring
+    setInterval(() => {
+        if (!document.hidden && currentExamId) {
+            loadExamData(currentExamId, false);
+        }
+    }, 10000);
 });
 
-async function loadDashboard() {
-    document.getElementById('students-list').innerHTML = '<div class="empty-panel">Loading...</div>';
+async function onExamSelected(examId) {
+    if (!examId) return;
+    currentExamId = examId;
+    await loadExamData(currentExamId, true);
+}
+
+async function loadExamData(examId, showLoading = true) {
+    if (showLoading) {
+        document.getElementById('students-list').innerHTML = '<div class="empty-panel">Loading students...</div>';
+    }
+    try {
+        const overview = await API.getExamOverview(examId);
+        renderOverview(overview);
+        allStudents = overview.students || [];
+        renderStudents();
+    } catch (e) {
+        console.error('Exam overview error:', e);
+        if (showLoading) {
+            document.getElementById('students-list').innerHTML =
+                `<div class="empty-panel" style="color:var(--danger)">Failed to load exam overview: ${e.message}</div>`;
+        }
+    }
+}
+
+async function loadDashboard(showLoading = true) {
+    if (showLoading) {
+        document.getElementById('students-list').innerHTML = '<div class="empty-panel">Loading...</div>';
+    }
     try {
         let examsList = await API.listExams();
         if (!examsList.exams || examsList.exams.length === 0) {
@@ -481,21 +524,34 @@ async function loadDashboard() {
             examsList = await API.listExams();
         }
 
-        if (!examsList.exams || examsList.exams.length === 0) {
+        const exams = examsList.exams || [];
+        const examSelect = document.getElementById('exam-select');
+        if (examSelect && exams.length > 0) {
+            examSelect.innerHTML = exams.map(ex => `
+                <option value="${escapeHtml(ex.exam_id)}" ${ex.exam_id === currentExamId ? 'selected' : ''}>
+                    ${escapeHtml(ex.title || ex.exam_id)}
+                </option>
+            `).join('');
+        }
+
+        if (exams.length === 0) {
             document.getElementById('students-list').innerHTML =
                 '<div class="empty-panel">No exams configured. Create an exam first.</div>';
             return;
         }
 
-        const examId = examsList.exams[0].exam_id;
-        const overview = await API.getExamOverview(examId);
-        renderOverview(overview);
-        allStudents = overview.students || [];
-        renderStudents();
+        if (!currentExamId || !exams.some(e => e.exam_id === currentExamId)) {
+            currentExamId = exams[0].exam_id;
+            if (examSelect) examSelect.value = currentExamId;
+        }
+
+        await loadExamData(currentExamId, showLoading);
     } catch (e) {
         console.error('Dashboard load error:', e);
-        document.getElementById('students-list').innerHTML =
-            `<div class="empty-panel" style="color:var(--danger)">Failed to load dashboard: ${e.message}</div>`;
+        if (showLoading) {
+            document.getElementById('students-list').innerHTML =
+                `<div class="empty-panel" style="color:var(--danger)">Failed to load dashboard: ${e.message}</div>`;
+        }
     }
 }
 
@@ -546,7 +602,7 @@ function renderStudents() {
         const progressInfo = getProgressLevel(progressPct);
 
         return `
-            <div class="student-row" data-id="${s.student_id}" data-exam="${s.session_id || ''}">
+            <div class="student-row" data-id="${s.student_id}" data-exam="${s.exam_id || currentExamId}">
                 <div>
                     <div class="student-name">${escapeHtml(s.student_id)}</div>
                     <div class="student-id">Session: ${s.session_id || '-'}</div>
@@ -571,7 +627,7 @@ function renderStudents() {
     list.querySelectorAll('.student-row').forEach(row => {
         row.addEventListener('click', () => {
             const studentId = row.dataset.id;
-            const examId = row.dataset.exam;
+            const examId = row.dataset.exam || currentExamId;
             if (studentId) showStudentDetail(studentId, examId);
         });
     });
@@ -672,6 +728,7 @@ function renderStudentDetail(data) {
                     <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'warn')">⚠️ Issue Warning</button>
                     <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'flag')">🚩 Flag Incident</button>
                     <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'pause')">⏸️ Pause Exam</button>
+                    <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'resume')">▶️ Resume Exam</button>
                     <button class="btn btn-sm btn-danger" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'terminate')">🛑 Terminate</button>
                     <button class="btn btn-sm btn-secondary" onclick="promptExaminerAction('${escapeHtml(data.student_id)}', '${escapeHtml(data.exam_id || '')}', 'note')">📝 Add Note</button>
                     <button class="btn btn-sm btn-secondary" onclick="verifyAuditModal('${escapeHtml(data.session_id || data.student_id + ':' + (data.exam_id || ''))}')">🔐 Audit Chain</button>
@@ -726,18 +783,31 @@ function renderStudentDetail(data) {
         </div>
 
         <div style="padding: 24px; border-top: 1px solid var(--border-color);">
-            <div class="detail-section-title">Score Breakdown</div>
+            <div class="detail-section-title">Score Breakdown & Automated AI Grading Explainability</div>
             ${grading.per_question ? Object.entries(grading.per_question).map(([qid, q]) => {
                 const qpct = q.max_score > 0 ? (q.score / q.max_score * 100) : 0;
                 const cls = qpct >= 70 ? 'success' : qpct >= 40 ? 'warning' : 'danger';
                 return `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-subtle);">
-                        <span style="font-size: 0.875rem;">${escapeHtml(q.question_text || 'Q')}</span>
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <div class="progress-bar" style="width: 80px;">
-                                <div class="progress-fill ${cls}" style="width: ${qpct}%"></div>
+                    <div style="padding: 10px 0; border-bottom: 1px solid var(--border-subtle);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.875rem; font-weight: 600;">${escapeHtml(q.question_text || 'Question ' + qid)}</span>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <div class="progress-bar" style="width: 80px;">
+                                    <div class="progress-fill ${cls}" style="width: ${qpct}%"></div>
+                                </div>
+                                <span style="font-family: var(--font-mono); font-size: 0.8125rem; width: 60px; text-align: right;">${q.score.toFixed(1)}/${q.max_score}</span>
                             </div>
-                            <span style="font-family: var(--font-mono); font-size: 0.8125rem; width: 60px; text-align: right;">${q.score.toFixed(1)}/${q.max_score}</span>
+                        </div>
+                        ${q.student_answer ? `
+                            <div style="font-size: 0.8125rem; color: var(--text-secondary); margin-top: 4px;">
+                                Candidate Answer: <code style="background:var(--bg-input);padding:2px 6px;border-radius:3px;">${escapeHtml(typeof q.student_answer === 'object' ? JSON.stringify(q.student_answer) : String(q.student_answer))}</code>
+                            </div>
+                        ` : ''}
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            ${q.overridden ? `<span class="badge badge-warning" style="font-size:10px;padding:2px 6px;">✏️ Overridden by Examiner: ${escapeHtml(q.override_reason || 'Manual Adjustment')}</span>` : ''}
+                            ${q.explanation ? `<span>💡 Explanation: ${escapeHtml(q.explanation)}</span>` : ''}
+                            ${q.similarity !== undefined ? `<span>🎯 Similarity: ${(q.similarity * 100).toFixed(0)}%</span>` : ''}
+                            ${q.confidence !== undefined ? `<span>🔍 Confidence: ${(q.confidence * 100).toFixed(0)}%</span>` : ''}
                         </div>
                     </div>
                 `;
@@ -751,12 +821,14 @@ async function promptExaminerAction(studentId, examId, actionType) {
         warn: 'Issue Official Warning to Student',
         flag: 'Flag Exam Session for Review',
         pause: 'Temporarily Pause Exam for Student',
+        resume: 'Resume Paused Exam for Student',
         terminate: 'Immediately Terminate Exam Session',
         note: 'Attach Examiner Observation Note'
     };
     const defaultMsg = actionType === 'warn' ? 'Unusual head movement / gaze detected. Please face the screen.'
                      : actionType === 'terminate' ? 'Severe integrity policy violation observed.'
                      : actionType === 'pause' ? 'Proctoring verification required.'
+                     : actionType === 'resume' ? 'Exam resumed by proctor.'
                      : 'Examiner observation recorded.';
 
     const message = prompt(`${actionLabels[actionType] || actionType}:\nEnter note / reason:`, defaultMsg);

@@ -47,7 +47,8 @@ const App = {
 
     getKeyboardStats() {
         const k = this._keystroke;
-        const elapsedMinutes = Math.max((Date.now() - (k.sessionStart || Date.now())) / 60000, 0.001);
+        const now = Date.now();
+        const elapsedMinutes = Math.max((now - (k.sessionStart || now)) / 60000, 0.001);
         const holds = k.holdDurations;
         const lats  = k.latencies;
         const mean = (arr) => arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
@@ -57,15 +58,17 @@ const App = {
         const stdHold  = std(holds, meanHold);
         const stdLat   = std(lats, meanLat);
         const deviation = Math.min((stdHold / Math.max(meanHold, 1) + stdLat / Math.max(meanLat, 1)) / 2, 1.0);
+        const currentIdleSeconds = k.lastKeyDownTime ? Math.max(0, Math.round((now - k.lastKeyDownTime) / 1000)) : 0;
         return {
-            events_per_minute: Math.round(k.eventCount / elapsedMinutes),
-            mean_key_hold:     Math.round(meanHold),
-            mean_latency:      Math.round(meanLat),
-            std_key_hold:      Math.round(stdHold),
-            std_latency:       Math.round(stdLat),
-            deviation:         Math.round(deviation * 10000) / 10000,
-            idle_seconds:      k.idleSeconds,
-            total_events:      k.eventCount,
+            events_per_minute:    Math.round(k.eventCount / elapsedMinutes),
+            mean_key_hold:        Math.round(meanHold),
+            mean_latency:         Math.round(meanLat),
+            std_key_hold:         Math.round(stdHold),
+            std_latency:          Math.round(stdLat),
+            deviation:            Math.round(deviation * 10000) / 10000,
+            idle_seconds:         currentIdleSeconds,
+            current_idle_seconds: currentIdleSeconds,
+            total_events:         k.eventCount,
         };
     },
 
@@ -111,21 +114,25 @@ const App = {
 
     getMouseStats() {
         const m = this._mouse;
-        const elapsedSeconds = Math.max((Date.now() - (m.sessionStart || Date.now())) / 1000, 0.001);
+        const now = Date.now();
+        const elapsedSeconds = Math.max((now - (m.sessionStart || now)) / 1000, 0.001);
         const speeds = m.speeds;
         const mean = (arr) => arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
         const std  = (arr, mu) => arr.length > 1 ? Math.sqrt(arr.reduce((s, v) => s + (v - mu) ** 2, 0) / arr.length) : 0;
         const avgSpeed = mean(speeds);
         const stdSpeed = std(speeds, avgSpeed);
         const deviation = Math.min(stdSpeed / Math.max(avgSpeed, 1), 1.0);
+        const currentIdleSeconds = m.lastMoveTime ? Math.max(0, Math.round((now - m.lastMoveTime) / 1000)) : 0;
         return {
-            avg_speed:      Math.round(avgSpeed),
-            std_speed:      Math.round(stdSpeed),
-            total_distance: Math.round(m.totalDistance),
-            click_rate:     Math.round((m.clicks / elapsedSeconds) * 100) / 100,
-            right_clicks:   m.rightClicks,
-            deviation:      Math.round(deviation * 10000) / 10000,
-            idle_seconds:   m.idleSeconds,
+            avg_speed:            Math.round(avgSpeed),
+            std_speed:            Math.round(stdSpeed),
+            total_distance:       Math.round(m.totalDistance),
+            click_rate:           Math.round((m.clicks / elapsedSeconds) * 100) / 100,
+            right_clicks:         m.rightClicks,
+            clicks:               m.clicks,
+            deviation:            Math.round(deviation * 10000) / 10000,
+            idle_seconds:         currentIdleSeconds,
+            current_idle_seconds: currentIdleSeconds,
         };
     },
 
@@ -277,6 +284,14 @@ const App = {
         this.authToken = localStorage.getItem('token');
         this.currentUser = this.getUserFromStorage();
 
+        // Redirect to /login if unauthenticated on protected pages
+        const publicPages = ['/', '/login', '/register'];
+        const currentPath = window.location.pathname.replace(/\/$/, '') || '/';
+        if (!this.authToken && !publicPages.includes(currentPath)) {
+            window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
+            return;
+        }
+
         // Listeners for copy, cut, paste, tab switch, fullscreen
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
@@ -307,6 +322,22 @@ const App = {
         });
 
         this.renderNavbar();
+    },
+
+    navigate(page) {
+        if (typeof showPage === 'function' && document.getElementById('page-' + page)) {
+            showPage(page);
+        } else if (page === 'exam' || page === 'sessions') {
+            window.location.href = '/student/exam';
+        } else if (page === 'dashboard') {
+            window.location.href = '/dashboard';
+        } else if (page === 'results') {
+            window.location.href = '/student/results';
+        } else if (page === 'examiner') {
+            window.location.href = '/examiner/dashboard';
+        } else {
+            window.location.href = '/' + page;
+        }
     },
 
     renderNavbar() {

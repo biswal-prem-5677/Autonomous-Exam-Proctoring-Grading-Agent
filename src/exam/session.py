@@ -18,6 +18,23 @@ class ExamSessionManager:
         self._timer_thread: Optional[threading.Thread] = None
         self._running = False
         self._warning_sent = False
+        self._paused = False
+        self._total_paused_seconds = 0.0
+        self._pause_start: Optional[datetime] = None
+
+    def pause(self) -> None:
+        """Pause the exam session countdown."""
+        if not self._paused:
+            self._paused = True
+            self._pause_start = datetime.now()
+
+    def resume(self) -> None:
+        """Resume the exam session countdown."""
+        if self._paused:
+            self._paused = False
+            if self._pause_start:
+                self._total_paused_seconds += (datetime.now() - self._pause_start).total_seconds()
+                self._pause_start = None
 
     def start(self) -> None:
         """Start the exam session and timer."""
@@ -35,7 +52,15 @@ class ExamSessionManager:
         duration = timedelta(minutes=self.session.duration_minutes)
 
         while self._running:
-            elapsed = datetime.now() - self.session.start_time
+            if self._paused:
+                time.sleep(1)
+                continue
+
+            current_pause = self._total_paused_seconds
+            if self._pause_start:
+                current_pause += (datetime.now() - self._pause_start).total_seconds()
+
+            elapsed = datetime.now() - self.session.start_time - timedelta(seconds=current_pause)
             remaining = duration - elapsed
 
             if remaining.total_seconds() <= 0:

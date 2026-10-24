@@ -115,6 +115,192 @@ def _get_db() -> Database:
     return _db_instance
 
 
+# ── RBAC Auth Decorator ──────────────────────────────────────────────────────
+from functools import wraps
+
+def require_auth(allowed_roles=None):
+    """Decorator: validate Bearer token and optionally enforce role.
+
+    Sets ``request.user`` to the authenticated user dict on success.
+    Returns 401 for missing/invalid token, 403 for wrong role.
+    """
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+            user = _get_auth_db().get_session_user(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+            if allowed_roles and user.get("role") not in allowed_roles:
+                return jsonify({"error": "Forbidden: insufficient privileges"}), 403
+            request.user = user  # type: ignore[attr-defined]
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# ── Answer-dict Unwrapping Helper ─────────────────────────────────────────────
+
+def _unwrap_answer_value(val):
+    """Unwrap ``{"answer": v, "timestamp": ...}`` → ``v``."""
+    if isinstance(val, dict):
+        if "answer" in val:
+            return val["answer"]
+        if "student_answer" in val:
+            return val["student_answer"]
+    return val
+
+
+def _unwrap_answers_dict(answers: dict) -> dict:
+    """Unwrap every value in an answers mapping."""
+    return {k: _unwrap_answer_value(v) for k, v in answers.items()}
+
+
+# ── Safe Controller Lookup (crash-proof after restart) ────────────────────────
+
+def _find_session_id(student_id: str, exam_id: str) -> Optional[str]:
+    """Look up the SQLite session_id for a student+exam pair."""
+    session_key = f"{student_id}:{exam_id}"
+    si = _active_sessions.get(session_key)
+    if si and si.get("session_id"):
+        return si["session_id"]
+    db = _get_db()
+    for s in db.list_sessions(limit=200):
+        if s.get("student_id") == student_id and s.get("exam_id") == exam_id:
+            return s["session_id"]
+    try:
+        row = db._conn.execute(
+            "SELECT session_id FROM session_meta WHERE session_key = ? OR (student_id = ? AND exam_id = ?)",
+            (session_key, student_id, exam_id)
+        ).fetchone()
+        if row:
+            return row["session_id"]
+    except Exception:
+        pass
+    return None
+
+
+def _get_or_rebuild_controller(student_id: str, exam_id: str):
+    """Return the live ExamController for the session, rebuilding from DB if needed.
+
+    Returns ``(controller, session_info)`` or ``(None, None)`` if no session exists.
+    """
+    session_key = f"{student_id}:{exam_id}"
+    session_info = _active_sessions.get(session_key)
+
+    # Fast path: controller already present
+    if session_info and "controller" in session_info and session_info["controller"] is not None:
+        return session_info["controller"], session_info
+
+    # Rebuild from DB
+    exam = _exam_manager.get_exam(exam_id)
+    if not exam:
+        return None, session_info
+
+    db = _get_db()
+
+    # Find session_id from DB
+    db_session = None
+    for s in db.list_sessions(limit=200):
+        if s.get("student_id") == student_id and s.get("exam_id") == exam_id:
+            db_session = s
+            break
+
+    if not db_session:
+        try:
+            row = db._conn.execute(
+                "SELECT session_id, student_id, exam_id, created_at, meta_json FROM session_meta WHERE session_key = ?",
+                (session_key,)
+            ).fetchone()
+            if not row:
+                row = db._conn.execute(
+                    "SELECT session_id, student_id, exam_id, created_at, meta_json FROM session_meta WHERE student_id = ? AND exam_id = ?",
+                    (student_id, exam_id)
+                ).fetchone()
+            if row:
+                db_session = dict(row)
+        except Exception:
+            pass
+
+    if not db_session:
+        return None, session_info
+
+    # Rebuild controller
+    duration = getattr(exam, "duration_minutes", 60) or 60
+    controller = _exam_manager.get_or_create_controller(student_id, exam_id, duration)
+    session = controller.session
+    if not session:
+        return None, session_info
+
+    if db_session.get("session_id"):
+        session.session_id = db_session["session_id"]
+
+    # Restore answers from DB
+    stored_answers = db.get_answers(db_session["session_id"])
+    for ans in stored_answers:
+        qid = ans.get("question_id")
+        sval = ans.get("student_answer", "")
+        if qid and qid not in session.answers:
+            session.answers[qid] = sval
+
+    # Rebuild active_sessions entry
+    if session_info is None:
+        session_info = {
+            "student_id": student_id,
+            "exam_id": exam_id,
+            "session_id": db_session["session_id"],
+            "created_at": db_session.get("created_at", ""),
+            "started_at": db_session.get("created_at", ""),
+        }
+    session_info["controller"] = controller
+    session_info.pop("_recovered", None)
+    _active_sessions[session_key] = session_info
+
+    # Rebuild proctoring agent if missing
+    if session_key not in _proctoring_agents:
+        agent = _create_proctoring_agent(_config)
+        _proctoring_agents[session_key] = agent
+
+    # Rebuild evidence log if missing
+    if session_key not in _evidence_logs:
+        _evidence_logs[session_key] = EvidenceLog(session_id=db_session["session_id"])
+
+    return controller, session_info
+
+
+def _load_answers_for_session(student_id: str, exam_id: str) -> dict:
+    """Load answers from in-memory controller or fall back to SQLite."""
+    session_key = f"{student_id}:{exam_id}"
+    session_info = _active_sessions.get(session_key)
+    if session_info and session_info.get("controller") and session_info["controller"].session:
+        return dict(session_info["controller"].session.answers)
+    # Fall back to DB
+    sid = _find_session_id(student_id, exam_id)
+    if sid:
+        db = _get_db()
+        ans_rows = db.get_answers(sid)
+        return {a["question_id"]: a["student_answer"] for a in ans_rows}
+    return {}
+
+
+def _apply_grade_overrides(session_id: str, per_question: dict, total_score: float) -> tuple:
+    """Apply grade overrides from DB to per_question dict. Returns updated (per_question, total_score)."""
+    db = _get_db()
+    overrides = db.get_grade_overrides(session_id=session_id)
+    for ov in overrides:
+        qid = ov.get("question_id")
+        if qid and qid in per_question:
+            old = per_question[qid].get("score", 0.0)
+            new = ov.get("new_score", old)
+            total_score = total_score - old + new
+            per_question[qid]["score"] = new
+            per_question[qid]["overridden"] = True
+            per_question[qid]["override_reason"] = ov.get("reason", "")
+    return per_question, total_score
+
+
 def _recover_sessions_from_db() -> None:
     """Repopulate in-memory lightweight session metadata from the DB.
 
@@ -372,6 +558,10 @@ def get_exam(exam_id):
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
+    # Strip answer keys for students
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    caller = _get_auth_db().get_session_user(token) if token else None
+    include_answers = not (caller and caller.get("role") == "student")
     return jsonify({
         "exam_id": exam.exam_id,
         "title": exam.title,
@@ -382,7 +572,7 @@ def get_exam(exam_id):
         "passing_score": getattr(exam, "passing_score", 40.0),
         "is_released": getattr(exam, "is_released", False),
         "settings": getattr(exam, "settings", {}),
-        "questions": [q.to_dict() for q in exam.questions],
+        "questions": [q.to_dict(include_answer=include_answers) for q in exam.questions],
         "question_count": len(exam.questions),
         "total_marks": sum(q.marks for q in exam.questions),
     })
@@ -576,7 +766,15 @@ def create_session():
     data = request.get_json(force=True)
     student_id = data.get("student_id", f"student_{int(time.time())}")
     exam_id = data.get("exam_id")
-    duration = data.get("duration_minutes", 60)
+
+    # Enforce student_id from auth token for student users (prevent spoofing)
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    auth_user = _get_auth_db().get_session_user(token) if token else None
+    if auth_user and auth_user.get("role") == "student":
+        valid_ids = {auth_user.get("user_id"), auth_user.get("username")}
+        valid_ids = {v for v in valid_ids if v}
+        if student_id not in valid_ids:
+            student_id = auth_user.get("user_id") or auth_user.get("username") or student_id
 
     if not exam_id:
         return jsonify({"error": "exam_id required"}), 400
@@ -584,6 +782,9 @@ def create_session():
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
+
+    # Enforce the exam's configured duration — ignore client-supplied override
+    duration = getattr(exam, "duration_minutes", 60) or 60
 
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
@@ -685,6 +886,20 @@ def create_session():
     except Exception:
         pass  # DB failure must not block exam start
 
+    # Also persist into the sessions table so list_sessions() finds it after restart.
+    try:
+        db = _get_db()
+        with db._write_lock:
+            db._conn.execute(
+                """INSERT OR REPLACE INTO sessions
+                   (session_id, student_id, exam_id, duration_minutes, started_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (session.session_id, student_id, exam_id, duration, session_created_at),
+            )
+            db._conn.commit()
+    except Exception:
+        pass  # best-effort; session_meta is the backup
+
     # Initialize proctoring agent for this session with active trained ML models
     agent = _create_proctoring_agent(_config)
     if student_id in _student_baselines:
@@ -713,7 +928,7 @@ def create_session():
         "exam_id": exam_id,
         "duration_minutes": duration,
         "started_at": session.start_time.isoformat(),
-        "questions": [q.to_dict() for q in exam.questions],
+        "questions": [q.to_dict(include_answer=False) for q in exam.questions],
         "total_marks": sum(q.marks for q in exam.questions),
         "status": "started",
         "is_preview": bool(is_authorized_preview),
@@ -722,19 +937,34 @@ def create_session():
 
 @app.route("/api/exam-sessions/<student_id>/<exam_id>/status", methods=["GET"])
 def session_status(student_id, exam_id):
-    session_key = f"{student_id}:{exam_id}"
-    session_info = _active_sessions.get(session_key)
-    if not session_info:
+    controller, session_info = _get_or_rebuild_controller(student_id, exam_id)
+    if not controller:
         return jsonify({"error": "Session not found"}), 404
 
-    controller = session_info["controller"]
     status = controller.get_session_status()
 
-    # Add questions if available
-    exam = _exam_manager.get_exam(exam_id)
+    # Add questions if available, ensuring correct_answer is stripped for students
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    user = _get_auth_db().get_session_user(token) if token else None
+    is_student = (user and user.get("role") == "student")
+
+    exam = _exam_manager.get_exam(exam_id) or _get_db().get_exam(exam_id)
     if exam:
-        status["questions"] = [q.to_dict() for q in exam.questions]
-        status["total_marks"] = sum(q.marks for q in exam.questions)
+        if hasattr(exam, "questions"):
+            status["questions"] = [q.to_dict(include_answer=not is_student) for q in exam.questions]
+            status["total_marks"] = sum(q.marks for q in exam.questions)
+        elif isinstance(exam, dict) and "questions" in exam:
+            q_list = []
+            for q_data in exam["questions"]:
+                qd = dict(q_data)
+                if is_student:
+                    qd.pop("correct_answer", None)
+                    qd.pop("reference_answer", None)
+                    qd.pop("keywords", None)
+                    qd.pop("rubric", None)
+                q_list.append(qd)
+            status["questions"] = q_list
+            status["total_marks"] = sum(q.get("marks", 1.0) for q in exam["questions"])
 
     return jsonify(status)
 
@@ -745,13 +975,13 @@ def submit_answer(student_id, exam_id):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if user and user.get("role") == "student":
-        auth_sid = user.get("username", user.get("user_id"))
-        if auth_sid and auth_sid != student_id:
+        valid_ids = {user.get("user_id"), user.get("username")}
+        valid_ids = {v for v in valid_ids if v}
+        if student_id not in valid_ids:
             return jsonify({"error": "Forbidden: Cannot access another student's session"}), 403
 
-    session_key = f"{student_id}:{exam_id}"
-    session_info = _active_sessions.get(session_key)
-    if not session_info:
+    controller, session_info = _get_or_rebuild_controller(student_id, exam_id)
+    if not controller:
         return jsonify({"error": "Session not found"}), 404
 
     data = request.get_json(force=True)
@@ -761,21 +991,22 @@ def submit_answer(student_id, exam_id):
     if question_id is None:
         return jsonify({"error": "question_id required"}), 400
 
-    controller = session_info["controller"]
     controller.submit_answer(question_id, answer)
 
     # Persist to SQLite for durability
     try:
-        sid = session_info.get("session_id", "")
-        _get_db().record_answer(
-            session_id=sid,
-            question_id=str(question_id),
-            student_answer=str(answer) if answer is not None else "",
-        )
+        sid = session_info.get("session_id", "") if session_info else _find_session_id(student_id, exam_id)
+        if sid:
+            _get_db().record_answer(
+                session_id=sid,
+                question_id=str(question_id),
+                student_answer=str(answer) if answer is not None else "",
+            )
     except Exception:
         pass  # best-effort DB save; in-memory is the authoritative copy during exam
 
     # Update knowledge tracer
+    session_key = f"{student_id}:{exam_id}"
     kt = _knowledge_tracers.get(session_key)
     if kt:
         exam = _exam_manager.get_exam(exam_id)
@@ -799,19 +1030,19 @@ def end_session(student_id, exam_id):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if user and user.get("role") == "student":
-        auth_sid = user.get("username", user.get("user_id"))
-        if auth_sid and auth_sid != student_id:
+        valid_ids = {user.get("user_id"), user.get("username")}
+        valid_ids = {v for v in valid_ids if v}
+        if student_id not in valid_ids:
             return jsonify({"error": "Forbidden: Cannot access another student's session"}), 403
 
-    session_key = f"{student_id}:{exam_id}"
-    session_info = _active_sessions.get(session_key)
-    if not session_info:
+    controller, session_info = _get_or_rebuild_controller(student_id, exam_id)
+    if not controller:
         return jsonify({"error": "Session not found"}), 404
 
-    controller = session_info["controller"]
     session = controller.end_exam()
 
     # Deactivate the DB session-meta record so it is not recovered on restart.
+    session_key = f"{student_id}:{exam_id}"
     try:
         _get_db().deactivate_session_meta(session_key)
     except Exception:
@@ -846,12 +1077,24 @@ def post_answer_unified():
             target_session_key = skey
             break
 
+    db_s = None
+    if not target_session_info:
+        try:
+            db_s = _get_db().get_session(session_id)
+            if db_s:
+                _, target_session_info = _get_or_rebuild_controller(db_s["student_id"], db_s["exam_id"])
+                target_session_key = f"{db_s['student_id']}:{db_s['exam_id']}"
+        except Exception:
+            pass
+
     # Security: check authorization
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if user and user.get("role") == "student":
         session_student_id = target_session_info.get("student_id") if target_session_info else None
-        if not session_student_id:
+        if not session_student_id and db_s:
+            session_student_id = db_s.get("student_id")
+        elif not session_student_id:
             try:
                 db_s = _get_db().get_session(session_id)
                 if db_s:
@@ -864,7 +1107,7 @@ def post_answer_unified():
             return jsonify({"error": "Forbidden: Cannot submit answers for another student's session"}), 403
 
     # Submit answer in controller
-    if target_session_info and "controller" in target_session_info:
+    if target_session_info and target_session_info.get("controller"):
         target_session_info["controller"].submit_answer(question_id, answer)
 
     # Persist to SQLite
@@ -897,12 +1140,24 @@ def finish_exam_session(session_id):
             target_session_key = skey
             break
 
+    db_s = None
+    if not target_session_info:
+        try:
+            db_s = _get_db().get_session(session_id)
+            if db_s:
+                _, target_session_info = _get_or_rebuild_controller(db_s["student_id"], db_s["exam_id"])
+                target_session_key = f"{db_s['student_id']}:{db_s['exam_id']}"
+        except Exception:
+            pass
+
     # Security: verify student ownership
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user = _get_auth_db().get_session_user(token) if token else None
     if user and user.get("role") == "student":
         session_student_id = target_session_info.get("student_id") if target_session_info else None
-        if not session_student_id:
+        if not session_student_id and db_s:
+            session_student_id = db_s.get("student_id")
+        elif not session_student_id:
             try:
                 db_s = _get_db().get_session(session_id)
                 if db_s:
@@ -914,7 +1169,7 @@ def finish_exam_session(session_id):
         if session_student_id and session_student_id not in valid_ids:
             return jsonify({"error": "Forbidden: Cannot finish another student's session"}), 403
 
-    if target_session_info and "controller" in target_session_info:
+    if target_session_info and target_session_info.get("controller"):
         session = target_session_info["controller"].end_exam()
         if target_session_key:
             try:
@@ -1288,7 +1543,11 @@ def examiner_overview(exam_id):
             continue
 
         student_id = session_info["student_id"]
-        controller = session_info["controller"]
+        controller = session_info.get("controller")
+        if not controller:
+            controller, session_info = _get_or_rebuild_controller(student_id, exam_id)
+        if not controller:
+            continue
         status = controller.get_session_status()
 
         # Get risk from evidence log
@@ -1362,11 +1621,8 @@ def student_detail(student_id, exam_id):
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
 
-    controller = None
-    status = {}
-    if session_info:
-        controller = session_info["controller"]
-        status = controller.get_session_status()
+    controller, session_info = _get_or_rebuild_controller(student_id, exam_id)
+    status = controller.get_session_status() if controller else {}
 
     # Risk history
     agent = _proctoring_agents.get(session_key)
@@ -1376,11 +1632,8 @@ def student_detail(student_id, exam_id):
     evidence_log = _evidence_logs.get(session_key)
     evidence_data = evidence_log.to_dict() if evidence_log else {}
 
-    # Grading results
-    if controller and controller.session:
-        answers = controller.session.answers
-    else:
-        answers = {}
+    # Grading results (safely loaded and unwrapped)
+    answers = _load_answers_for_session(student_id, exam_id)
     grading = _grade_session_internal(student_id, exam_id, exam, answers)
 
     # Build risk timeline from history — use actual timestamps from entries
@@ -2268,16 +2521,30 @@ def behavioral_analyze():
     session_key = data.get("session_key", "default")
     from src.features.behavioral import BehavioralFeatureExtractor
     extractor = BehavioralFeatureExtractor()
+    vision_status = data.get("vision_status", "OK")
+    camera_connected = vision_status not in ("UNKNOWN", "CAMERA_ERROR", "NO_CAMERA")
+
+    kb = data.get("keyboard", {})
+    mouse = data.get("mouse", {})
+    browser = data.get("browser", {})
+    audio = data.get("audio_features", {})
+
+    face_present = data.get("face_present", True)
+    if not camera_connected:
+        face_present = True  # Suppress false face_absent alerts when camera is disconnected
+
     signals = {
-        "face_present": data.get("face_present", True), "face_confidence": data.get("face_confidence", 0.9),
-        "face_count": data.get("face_count", 1), "head_pose": data.get("head_pose", {"yaw": 0}),
-        "audio_features": data.get("audio_features", {"rms_energy": 0.05, "volume_db": -60, "zero_crossing_rate": 0.1}),
-        "keyboard_idle_seconds": data.get("keyboard_idle_seconds", 30),
-        "keyboard_events_per_minute": data.get("keyboard_events_per_minute", 60),
-        "mouse_avg_speed": data.get("mouse_avg_speed", 100),
-        "mouse_total_distance": data.get("mouse_total_distance", 500),
-        "mouse_click_count": data.get("mouse_click_count", 10),
-        "mouse_idle_seconds": data.get("mouse_idle_seconds", 15),
+        "face_present": face_present,
+        "face_confidence": data.get("face_confidence", 0.9 if camera_connected else 0.0),
+        "face_count": data.get("face_count", 1),
+        "head_pose": data.get("head_pose", {"yaw": 0}),
+        "audio_features": audio or {"rms_energy": 0.05, "volume_db": -60, "zero_crossing_rate": 0.1},
+        "keyboard_idle_seconds": kb.get("idle_seconds", data.get("keyboard_idle_seconds", 30)),
+        "keyboard_events_per_minute": kb.get("events_per_minute", data.get("keyboard_events_per_minute", 60)),
+        "mouse_avg_speed": mouse.get("avg_speed", data.get("mouse_avg_speed", 100)),
+        "mouse_total_distance": mouse.get("total_distance", data.get("mouse_total_distance", 500)),
+        "mouse_click_count": mouse.get("clicks", mouse.get("click_count", data.get("mouse_click_count", 10))),
+        "mouse_idle_seconds": mouse.get("idle_seconds", data.get("mouse_idle_seconds", 15)),
         "multi_face_events": data.get("multi_face_events", 0),
         "session_elapsed": data.get("session_elapsed", 600),
         "total_events": data.get("total_events", 5),
@@ -2287,37 +2554,56 @@ def behavioral_analyze():
         feature_list = features.tolist() if hasattr(features, 'tolist') else list(features)
     except Exception:
         feature_list = [0.0] * 22
-    kb = data.get("keyboard", {})
+
     keyboard_stats = {
-        "keystrokes_per_min": kb.get("events_per_minute", 0), "mean_key_hold_ms": kb.get("mean_key_hold", 0),
+        "keystrokes_per_min": kb.get("events_per_minute", 0),
+        "mean_key_hold_ms": kb.get("mean_key_hold", 0),
         "mean_latency_ms": kb.get("mean_latency", 0),
         "idle_ratio": round(kb.get("idle_seconds", 0) / max(data.get("session_elapsed", 600), 1), 3),
         "deviation": round(kb.get("deviation", 0.0), 4),
         "metric_type": "within_session_cv",
     }
-    mouse = data.get("mouse", {})
     mouse_stats = {
-        "velocity_px_s": mouse.get("avg_speed", 0), "distance_px": mouse.get("total_distance", 0),
+        "velocity_px_s": mouse.get("avg_speed", 0),
+        "distance_px": mouse.get("total_distance", 0),
         "click_rate_s": mouse.get("click_rate", 0),
         "idle_ratio": round(mouse.get("idle_seconds", 0) / max(data.get("session_elapsed", 600), 1), 3),
         "deviation": round(mouse.get("deviation", 0.0), 4),
         "metric_type": "within_session_cv",
     }
-    audio = data.get("audio_features", {})
     audio_stats = {
-        "rms": round(audio.get("rms_energy", 0), 4), "db": round(audio.get("volume_db", -100), 1),
+        "rms": round(audio.get("rms_energy", 0), 4),
+        "db": round(audio.get("volume_db", -100), 1),
         "zcr": round(audio.get("zero_crossing_rate", 0), 4),
         "spectral_centroid": round(audio.get("spectral_centroid", 0), 1),
         "activity": "Active" if audio.get("volume_db", -100) > -40 else "Normal",
     }
-    browser = data.get("browser", {})
+
+    # Use delta stats if available from frontend to avoid latching persistent cumulative counts
+    delta_tabs = browser.get("delta_tab_switches")
+    tab_switched = (delta_tabs > 0) if delta_tabs is not None else (browser.get("tab_switches", 0) > 0)
+
+    delta_fs = browser.get("delta_fullscreen_exits")
+    fs_exited = (delta_fs > 0) if delta_fs is not None else (browser.get("fullscreen_exits", 0) > 0)
+
+    delta_pastes = browser.get("delta_pastes", 0)
+    delta_copies = browser.get("delta_copies", 0)
+    delta_cuts = browser.get("delta_cuts", 0)
+
     browser_stats = {
-        "tab_switches": browser.get("tab_switches", 0), "window_blurs": browser.get("window_blurs", 0),
-        "fullscreen_exits": browser.get("fullscreen_exits", 0), "visibility_changes": browser.get("visibility_changes", 0),
+        "tab_switches": browser.get("tab_switches", 0),
+        "delta_tab_switches": delta_tabs if delta_tabs is not None else 0,
+        "window_blurs": browser.get("window_blurs", 0),
+        "fullscreen_exits": browser.get("fullscreen_exits", 0),
+        "delta_fullscreen_exits": delta_fs if delta_fs is not None else 0,
+        "visibility_changes": browser.get("visibility_changes", 0),
+        "delta_pastes": delta_pastes,
+        "delta_copies": delta_copies,
+        "delta_cuts": delta_cuts,
     }
     anomaly_score = round(min(
         keyboard_stats["deviation"] * 0.3 + mouse_stats["deviation"] * 0.3 +
-        (1.0 if browser_stats["tab_switches"] > 3 else 0.0) * 0.4, 1.0), 4)
+        (1.0 if tab_switched else 0.0) * 0.4, 1.0), 4)
 
     # Process signals through active ProctoringAgent & EvidenceLog if present
     agent = _proctoring_agents.get(session_key)
@@ -2328,9 +2614,13 @@ def behavioral_analyze():
         agent_signals.update({
             "typing_wpm": float(kb.get("events_per_minute", 60)) / 5.0,
             "mouse_velocity": float(mouse.get("avg_speed", 0)),
-            "mouse_clicks": int(mouse.get("clicks", 0)),
-            "tab_switch": browser_stats.get("tab_switches", 0) > 0,
-            "fullscreen_exit": browser_stats.get("fullscreen_exits", 0) > 0,
+            "mouse_clicks": int(mouse.get("clicks", mouse.get("click_count", 0))),
+            "tab_switch": tab_switched,
+            "fullscreen_exit": fs_exited,
+            "paste_event": delta_pastes > 0,
+            "copy_event": delta_copies > 0,
+            "cut_event": delta_cuts > 0,
+            "camera_connected": camera_connected,
         })
         try:
             agent_result = agent.process_signals(agent_signals)
@@ -2353,6 +2643,7 @@ def behavioral_analyze():
         "keyboard": keyboard_stats, "mouse": mouse_stats, "audio": audio_stats, "browser": browser_stats,
         "anomaly_score": anomaly_score, "anomaly_detected": anomaly_score > 0.5,
         "agent_state": agent_state, "agent_risk": agent_risk,
+        "camera_connected": camera_connected,
     }
     return jsonify(result)
 
@@ -2491,24 +2782,8 @@ def grading_inspect(student_id, exam_id):
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
-    session_key = student_id + ":" + exam_id
-    session_info = _active_sessions.get(session_key)
-    answers = {}
-    if session_info and session_info.get("controller") and session_info["controller"].session:
-        answers = session_info["controller"].session.answers
-    else:
-        try:
-            db = _get_db()
-            sid = None
-            for s in db.list_sessions(limit=100):
-                if s["student_id"] == student_id and s["exam_id"] == exam_id:
-                    sid = s["session_id"]
-                    break
-            if sid:
-                ans = db.get_answers(sid)
-                answers = {a["question_id"]: a["student_answer"] for a in ans}
-        except Exception:
-            pass
+    answers_raw = _load_answers_for_session(student_id, exam_id)
+    answers = _unwrap_answers_dict(answers_raw)
     ref_answers = {}
     for q in exam.questions:
         if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
@@ -2519,9 +2794,11 @@ def grading_inspect(student_id, exam_id):
         qid = q.id
         if qid in results.get("per_question", {}):
             r = results["per_question"][qid]
+            raw_val = answers_raw.get(qid, "")
+            ans_disp = raw_val.get("answer", "") if isinstance(raw_val, dict) else raw_val
             per_question[qid] = {
                 "question_id": qid, "question_text": q.text, "question_type": q.type.value,
-                "marks": q.marks, "student_answer": answers.get(qid, ""),
+                "marks": q.marks, "student_answer": ans_disp,
                 "correct_answer": q.correct_answer, "keywords": q.keywords,
                 "score": r.get("score", 0.0), "max_score": r.get("max_score", q.marks),
                 "correct": r.get("correct", False),
@@ -2530,10 +2807,16 @@ def grading_inspect(student_id, exam_id):
                 "similarity": r.get("combined_similarity", r.get("semantic_similarity", 0)),
                 "cosine_similarity": r.get("cosine_similarity", 0), "keyword_coverage": r.get("keyword_coverage", 0),
             }
+    session_id = _find_session_id(student_id, exam_id)
+    total_score = results.get("total_score", 0.0)
+    if session_id:
+        per_question, total_score = _apply_grade_overrides(session_id, per_question, total_score)
+    total_max = results.get("total_max", sum(q.marks for q in exam.questions))
+    pct = round(total_score / total_max * 100, 2) if total_max > 0 else 0.0
     return jsonify({
         "student_id": student_id, "exam_id": exam_id, "per_question": per_question,
-        "total_score": results.get("total_score", 0.0), "total_max": results.get("total_max", 0.0),
-        "percentage": results.get("percentage", 0.0),
+        "total_score": round(total_score, 2), "total_max": total_max,
+        "percentage": pct,
         "answers_submitted": len(answers), "total_questions": len(exam.questions),
     })
 
@@ -2955,6 +3238,12 @@ def examiner_action_api():
                 session_info["controller"].pause_exam()
             except Exception:
                 pass
+    elif action_type == "resume":
+        if session_info and "controller" in session_info:
+            try:
+                session_info["controller"].resume_exam()
+            except Exception:
+                pass
 
     return jsonify({
         "status": "success",
@@ -2981,8 +3270,64 @@ def list_examiner_actions_api(session_id):
         return jsonify({"error": "session_id is required"}), 400
 
     db = _get_db()
-    actions = db.get_examiner_actions(session_id=session_key)
+    actions = list(db.get_examiner_actions(session_id=session_key))
+    seen_ids = {a.get("action_id") for a in actions}
+
+    # Cross-lookup: if session_key is student_id:exam_id, also lookup by UUID session_id
+    if ":" in session_key:
+        parts = session_key.split(":")
+        uuid_sid = _find_session_id(parts[0], parts[1])
+        if uuid_sid and uuid_sid != session_key:
+            extra = db.get_examiner_actions(session_id=uuid_sid)
+            for act in extra:
+                if act.get("action_id") not in seen_ids:
+                    actions.append(act)
+                    seen_ids.add(act.get("action_id"))
+    else:
+        # If session_key is UUID session_id, check if any actions were recorded with student_id:exam_id
+        db_s = db.get_session(session_key)
+        if db_s:
+            skey = f"{db_s.get('student_id')}:{db_s.get('exam_id')}"
+            extra = db.get_examiner_actions(session_id=skey)
+            for act in extra:
+                if act.get("action_id") not in seen_ids:
+                    actions.append(act)
+                    seen_ids.add(act.get("action_id"))
+
     return jsonify({"session_id": session_key, "actions": actions, "count": len(actions)})
+
+
+@app.route("/api/student/appeal", methods=["POST"])
+def submit_student_appeal():
+    """Submit a grade appeal from a student."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _get_auth_db().get_session_user(token) if token else None
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    student_id = user.get("username", user.get("user_id"))
+    data = request.get_json(force=True) if request.data else {}
+    exam_id = data.get("exam_id")
+    reason = data.get("reason", "").strip()
+    if not exam_id or not reason:
+        return jsonify({"error": "exam_id and reason are required"}), 400
+
+    db = _get_db()
+    session_id = _find_session_id(student_id, exam_id) or f"{student_id}:{exam_id}"
+    action_id = db.record_examiner_action(
+        session_id=str(session_id),
+        action_type="appeal",
+        message=f"Student appeal: {reason}",
+        examiner_id=str(student_id),
+    )
+    return jsonify({
+        "status": "success",
+        "action_id": action_id,
+        "action_type": "appeal",
+        "student_id": student_id,
+        "exam_id": exam_id,
+        "reason": reason,
+        "timestamp": datetime.now().isoformat(),
+    })
 
 
 
@@ -3374,39 +3719,60 @@ def examiner_submissions():
     if not exam_id:
         return jsonify({"submissions": []})
 
-    exam = _exam_manager.get_exam(exam_id)
+    db = _get_db()
+    exam = _exam_manager.get_exam(exam_id) or db.get_exam(exam_id)
     if not exam:
         return jsonify({"submissions": []})
 
     submissions = []
-    for skey, agent in _proctoring_agents.items():
+    seen_students = set()
+
+    for skey, session_info in _active_sessions.items():
         parts = skey.split(":")
         if len(parts) >= 2 and parts[1] == exam_id:
-            status = agent.get_status()
-            session_info = _active_sessions.get(skey)
-            answers = {}
-            if session_info and session_info.get("controller") and session_info["controller"].session:
-                answers = session_info["controller"].session.answers
-
-            # Grade answers
-            ref_answers = {}
-            for q in exam.questions:
-                if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
-                    ref_answers[q.id] = str(q.correct_answer)
-
-            results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+            student_id = parts[0]
+            seen_students.add(student_id)
+            agent = _proctoring_agents.get(skey)
+            status = agent.get_status() if agent else {}
+            graded = _grade_session_internal(student_id, exam_id, exam)
+            answers = _load_answers_for_session(student_id, exam_id)
 
             submissions.append({
-                "student_id": parts[0],
+                "student_id": student_id,
                 "exam_id": exam_id,
-                "total_score": results.get("total_score", 0.0),
-                "total_max": results.get("total_max", 0.0),
-                "percentage": results.get("percentage", 0.0),
+                "total_score": graded.get("total_score", 0.0),
+                "total_max": graded.get("total_max", 0.0),
+                "percentage": graded.get("percentage", 0.0),
                 "answers": len(answers),
                 "state": status.get("state", "NORMAL"),
                 "risk_score": status.get("current_risk", 0.0),
-                "submitted_at": datetime.now().isoformat(),
+                "submitted_at": session_info.get("started_at", datetime.now().isoformat()),
             })
+
+    # Also query SQLite sessions table for any finished sessions or sessions after server restart
+    try:
+        db_rows = db._conn.execute(
+            "SELECT * FROM sessions WHERE exam_id = ? ORDER BY created_at DESC", (exam_id,)
+        ).fetchall()
+        for r in db_rows:
+            sid = r["student_id"]
+            if sid not in seen_students:
+                seen_students.add(sid)
+                graded = _grade_session_internal(sid, exam_id, exam)
+                answers = _load_answers_for_session(sid, exam_id)
+                submissions.append({
+                    "student_id": sid,
+                    "exam_id": exam_id,
+                    "total_score": graded.get("total_score", 0.0),
+                    "total_max": graded.get("total_max", 0.0),
+                    "percentage": graded.get("percentage", 0.0),
+                    "answers": len(answers),
+                    "state": r["state"] or "NORMAL",
+                    "risk_score": r["risk_score"] or 0.0,
+                    "submitted_at": r["ended_at"] or r["created_at"] or datetime.now().isoformat(),
+                })
+    except Exception:
+        pass
 
     return jsonify({"submissions": submissions, "count": len(submissions)})
 
@@ -3420,46 +3786,83 @@ def student_results_api():
         return jsonify({"error": "Unauthorized"}), 401
 
     student_id = user.get("username", user.get("user_id", ""))
+    user_id = user.get("user_id", "")
     results = []
     db = _get_db()
+    seen_exams = set()
 
-    # Find exams this student has taken
-    for skey, agent in _proctoring_agents.items():
+    # Query DB sessions
+    try:
+        db_sessions = db._conn.execute(
+            "SELECT * FROM sessions WHERE student_id = ? OR student_id = ? ORDER BY created_at DESC",
+            (student_id, user_id)
+        ).fetchall()
+        for s in db_sessions:
+            eid = s["exam_id"]
+            if eid in seen_exams:
+                continue
+
+            exam = _exam_manager.get_exam(eid)
+            is_rel = getattr(exam, "is_released", False) if exam else False
+            db_exam = db.get_exam(eid)
+            if db_exam:
+                is_rel = is_rel or bool(db_exam.get("is_released", False))
+
+            if not is_rel and s["state"] != "released":
+                continue
+
+            if not exam:
+                continue
+
+            seen_exams.add(eid)
+            graded = _grade_session_internal(s["student_id"], eid, exam)
+            answers = _load_answers_for_session(s["student_id"], eid)
+            results.append({
+                "exam_id": eid,
+                "exam_title": exam.title,
+                "total_score": graded.get("total_score", 0.0),
+                "total_max": graded.get("total_max", 0.0),
+                "percentage": graded.get("percentage", 0.0),
+                "answered": len(answers),
+                "is_released": True,
+                "status": "released",
+                "submitted_at": s["ended_at"] or s["created_at"] or datetime.now().isoformat(),
+            })
+    except Exception:
+        pass
+
+    # Active sessions in memory
+    for skey in list(_active_sessions.keys()):
         parts = skey.split(":")
-        if len(parts) >= 1 and (parts[0] == student_id or parts[0] == user.get("user_id", "")):
-            exam_id = parts[1] if len(parts) > 1 else ""
+        if len(parts) >= 2 and (parts[0] == student_id or parts[0] == user_id):
+            eid = parts[1]
+            if eid in seen_exams:
+                continue
 
-            exam = _exam_manager.get_exam(exam_id)
-            if exam:
-                is_rel = getattr(exam, "is_released", False)
-                db_exam = db.get_exam(exam_id)
-                if db_exam:
-                    is_rel = is_rel or db_exam.get("is_released", False)
-                if not is_rel:
-                    continue  # Hidden until published
+            exam = _exam_manager.get_exam(eid)
+            if not exam:
+                continue
+            is_rel = getattr(exam, "is_released", False)
+            db_exam = db.get_exam(eid)
+            if db_exam:
+                is_rel = is_rel or bool(db_exam.get("is_released", False))
+            if not is_rel:
+                continue
 
-                session_info = _active_sessions.get(skey)
-                answers = {}
-                if session_info and session_info.get("controller") and session_info["controller"].session:
-                    answers = session_info["controller"].session.answers
-
-                ref_answers = {}
-                for q in exam.questions:
-                    if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
-                        ref_answers[q.id] = str(q.correct_answer)
-
-                grade_results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
-                results.append({
-                    "exam_id": exam_id,
-                    "exam_title": exam.title,
-                    "total_score": grade_results.get("total_score", 0.0),
-                    "total_max": grade_results.get("total_max", 0.0),
-                    "percentage": grade_results.get("percentage", 0.0),
-                    "answered": len(answers),
-                    "is_released": True,
-                    "status": "released",
-                    "submitted_at": datetime.now().isoformat(),
-                })
+            seen_exams.add(eid)
+            graded = _grade_session_internal(parts[0], eid, exam)
+            answers = _load_answers_for_session(parts[0], eid)
+            results.append({
+                "exam_id": eid,
+                "exam_title": exam.title,
+                "total_score": graded.get("total_score", 0.0),
+                "total_max": graded.get("total_max", 0.0),
+                "percentage": graded.get("percentage", 0.0),
+                "answered": len(answers),
+                "is_released": True,
+                "status": "released",
+                "submitted_at": datetime.now().isoformat(),
+            })
 
     return jsonify({"results": results, "count": len(results)})
 
@@ -3476,11 +3879,21 @@ def student_result_detail(exam_id):
     if not exam:
         return jsonify({"error": "Exam not found"}), 404
 
+    student_id = user.get("username", user.get("user_id", ""))
+    user_id = user.get("user_id", "")
     db = _get_db()
+
+    # Check release status
     is_rel = getattr(exam, "is_released", False)
     db_exam = db.get_exam(exam_id)
     if db_exam:
-        is_rel = is_rel or db_exam.get("is_released", False)
+        is_rel = is_rel or bool(db_exam.get("is_released", False))
+
+    session_id = _find_session_id(student_id, exam_id) or _find_session_id(user_id, exam_id)
+    db_s = db.get_session(session_id) if session_id else None
+    if db_s and db_s.get("state") == "released":
+        is_rel = True
+
     if not is_rel:
         return jsonify({
             "error": "Exam results have not been released by the examiner yet.",
@@ -3488,47 +3901,54 @@ def student_result_detail(exam_id):
             "status": "pending_release"
         }), 403
 
-    # Find student's session
-    student_id = user.get("username", user.get("user_id", ""))
-    session_key = f"{student_id}:{exam_id}"
-    session_info = _active_sessions.get(session_key)
+    graded = _grade_session_internal(student_id, exam_id, exam)
+    # If grading with username returned empty, try with user_id
+    if not graded.get("per_question") and user_id and user_id != student_id:
+        graded = _grade_session_internal(user_id, exam_id, exam)
 
-    answers = {}
-    if session_info and session_info.get("controller") and session_info["controller"].session:
-        answers = session_info["controller"].session.answers
+    raw_answers = _load_answers_for_session(student_id, exam_id)
+    if not raw_answers and user_id != student_id:
+        raw_answers = _load_answers_for_session(user_id, exam_id)
 
-    # Grade
-    ref_answers = {}
-    for q in exam.questions:
-        if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
-            ref_answers[q.id] = str(q.correct_answer)
+    per_question = dict(graded.get("per_question", {}))
 
-    results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+    # Ensure overrides are applied even if _grade_session_internal missed them
+    if session_id and per_question:
+        per_question, _ = _apply_grade_overrides(session_id, per_question, graded.get("total_score", 0.0))
+        # Recalculate total after overrides
+        total_score = sum(pq.get("score", 0.0) for pq in per_question.values())
+        total_max = graded.get("total_max", 0.0)
+        pct = round(total_score / total_max * 100, 2) if total_max > 0 else 0.0
+        graded["total_score"] = round(total_score, 2)
+        graded["percentage"] = pct
 
-    per_question = {}
     for q in exam.questions:
         qid = q.id
-        if qid in results.get("per_question", {}):
-            r = results["per_question"][qid]
+        raw_val = raw_answers.get(qid, "")
+        ans_disp = raw_val.get("answer", "") if isinstance(raw_val, dict) else raw_val
+        if qid not in per_question:
             per_question[qid] = {
                 "question_id": qid,
                 "question_text": q.text,
                 "question_type": q.type.value,
                 "marks": q.marks,
-                "score": r.get("score", 0.0),
-                "max_score": r.get("max_score", q.marks),
-                "correct": r.get("correct", False),
-                "student_answer": answers.get(qid, ""),
+                "score": 0.0,
+                "max_score": q.marks,
+                "correct": False,
+                "student_answer": ans_disp,
                 "correct_answer": q.correct_answer,
             }
+        else:
+            per_question[qid]["student_answer"] = ans_disp
+            per_question[qid]["correct_answer"] = q.correct_answer
 
     return jsonify({
         "exam_id": exam_id,
         "exam_title": exam.title,
         "per_question": per_question,
-        "total_score": results.get("total_score", 0.0),
-        "total_max": results.get("total_max", 0.0),
-        "percentage": results.get("percentage", 0.0),
+        "total_score": graded.get("total_score", 0.0),
+        "total_max": graded.get("total_max", 0.0),
+        "percentage": graded.get("percentage", 0.0),
         "grading_methods": {
             "mcq": "exact_match",
             "numerical": "tolerance_based",
@@ -3580,50 +4000,63 @@ def change_password():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _grade_session_internal(student_id, exam_id, exam, answers=None):
-    """Grade a session's answers internally."""
+    """Grade a session's answers internally, unwrapping answers and applying overrides."""
     if answers is None:
-        session_key = f"{student_id}:{exam_id}"
-        session_info = _active_sessions.get(session_key)
-        if session_info and session_info["controller"].session:
-            answers = session_info["controller"].session.answers
-        else:
-            answers = {}
+        answers = _load_answers_for_session(student_id, exam_id)
 
-    if not answers:
+    raw_answers = dict(answers) if answers else {}
+    unwrapped_answers = _unwrap_answers_dict(raw_answers)
+
+    total_max = sum(q.marks for q in exam.questions) if hasattr(exam, "questions") else 100.0
+
+    if not unwrapped_answers:
         return {
+            "student_id": student_id,
+            "exam_id": exam_id,
             "per_question": {},
             "total_score": 0.0,
-            "total_max": sum(q.marks for q in exam.questions),
+            "total_max": total_max,
             "percentage": 0.0,
         }
 
     # Build reference answers map
     ref_answers = {}
-    for q in exam.questions:
-        if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
-            ref_answers[q.id] = str(q.correct_answer)
+    if hasattr(exam, "questions"):
+        for q in exam.questions:
+            if q.correct_answer and q.type in (QuestionType.SHORT_ANSWER, QuestionType.LONG_ANSWER):
+                ref_answers[q.id] = str(q.correct_answer)
 
-    results = _grading_orchestrator.grade_all(exam.questions, answers, ref_answers)
+    results = _grading_orchestrator.grade_all(getattr(exam, "questions", []), unwrapped_answers, ref_answers)
 
     per_question = {}
-    for q in exam.questions:
-        qid = q.id
-        if qid in results.get("per_question", {}):
-            per_question[qid] = {
-                "question_id": qid,
-                "question_text": q.text,
-                "question_type": q.type.value,
-                "marks": q.marks,
-                **results["per_question"][qid],
-            }
+    if hasattr(exam, "questions"):
+        for q in exam.questions:
+            qid = q.id
+            if qid in results.get("per_question", {}):
+                per_question[qid] = {
+                    "question_id": qid,
+                    "question_text": q.text,
+                    "question_type": q.type.value,
+                    "marks": q.marks,
+                    **results["per_question"][qid],
+                }
+
+    # Apply DB grade overrides
+    session_id = _find_session_id(student_id, exam_id)
+    total_score = results.get("total_score", 0.0)
+    if session_id:
+        per_question, total_score = _apply_grade_overrides(session_id, per_question, total_score)
+
+    total_max = results.get("total_max", total_max)
+    pct = round(total_score / total_max * 100, 2) if total_max > 0 else 0.0
 
     return {
         "student_id": student_id,
         "exam_id": exam_id,
         "per_question": per_question,
-        "total_score": results.get("total_score", 0.0),
-        "total_max": results.get("total_max", 0.0),
-        "percentage": results.get("percentage", 0.0),
+        "total_score": round(total_score, 2),
+        "total_max": total_max,
+        "percentage": pct,
     }
 
 

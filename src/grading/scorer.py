@@ -12,6 +12,21 @@ from src.grading.plagiarism import PlagiarismDetector
 from src.grading.consensus import GraderDisagreementEngine
 
 
+def _unwrap_answer_val(val: Any) -> Any:
+    if isinstance(val, dict):
+        if "answer" in val:
+            return val["answer"]
+        if "student_answer" in val:
+            return val["student_answer"]
+    return val
+
+
+def _unwrap_answers_dict(answers: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not answers:
+        return {}
+    return {k: _unwrap_answer_val(v) for k, v in answers.items()}
+
+
 class GradingOrchestrator:
     """Routes each question to its appropriate grader and aggregates results."""
 
@@ -29,16 +44,8 @@ class GradingOrchestrator:
     def grade_all(self, questions: List[Question],
                   answers: Dict[str, Any],
                   reference_answers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Grade all answers across all question types.
-
-        Routes to:
-        - MCQ / True-False → exact match
-        - Numerical → tolerance-based
-        - Short Answer → TF-IDF + keyword coverage
-        - Long/Descriptive Answer → multi-signal (semantic + keyword + structure + coverage)
-        - Mathematical → step-by-step derivation + formula + units + partial credit
-        - Programming → AST sandbox + security analysis + test-suite evaluation
-        """
+        """Grade all answers across all question types."""
+        answers = _unwrap_answers_dict(answers)
         mcq_results = self.grade_mcq(questions, answers)
         numerical_results = self.grade_numerical(questions, answers)
         short_answer_results = self.grade_short_answer(questions, answers, reference_answers)
@@ -54,22 +61,27 @@ class GradingOrchestrator:
     def grade_mcq(self, questions: List[Question],
                   answers: Dict[str, Any]) -> Dict[str, Any]:
         """Grade MCQ and true/false questions."""
+        answers = _unwrap_answers_dict(answers)
         mcq_questions = [q for q in questions if q.type in (QuestionType.MCQ, QuestionType.TRUE_FALSE)]
         return self.mcq_grader.grade_batch(mcq_questions, answers)
 
     def grade_numerical(self, questions: List[Question],
                         answers: Dict[str, Any]) -> Dict[str, Any]:
         """Grade numerical questions."""
+        answers = _unwrap_answers_dict(answers)
         num_questions = [q for q in questions if q.type == QuestionType.NUMERICAL]
         return self.numerical_grader.grade_batch(num_questions, answers)
 
     def grade_short_answer(self, questions: List[Question],
                            answers: Dict[str, Any],
                            reference_answers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-        """Grade short-answer questions using TF-IDF + keyword coverage."""
+        """Grade short-answer questions using TF-IDF + keyword coverage + anti-gaming analysis."""
+        answers = _unwrap_answers_dict(answers)
         short_qs = [q for q in questions if q.type == QuestionType.SHORT_ANSWER]
         if not short_qs:
             return {"per_question": {}, "total_score": 0.0, "total_max": 0.0, "percentage": 0.0}
+
+        import re
 
         # Build reference corpus for TF-IDF
         refs = []
@@ -90,10 +102,8 @@ class GradingOrchestrator:
         total_max = 0.0
 
         for q in short_qs:
-            student_ans = answers.get(q.id, "")
-            if isinstance(student_ans, dict):
-                student_ans = student_ans.get("answer", "")
-            student_str = str(student_ans)
+            student_ans = _unwrap_answer_val(answers.get(q.id, ""))
+            student_str = str(student_ans or "").strip()
 
             ref_answer = None
             if reference_answers and q.id in reference_answers:
@@ -102,7 +112,28 @@ class GradingOrchestrator:
                 ref_answer = str(q.correct_answer)
             elif q.metadata:
                 ref_answer = q.metadata.get("model_answer") or q.metadata.get("reference_answer")
-            ref_answer = ref_answer or ""
+            ref_answer = (ref_answer or "").strip()
+
+            # Warning & Review if no reference model answer and no keywords
+            if not ref_answer and not q.keywords:
+                per_question[q.id] = {
+                    "score": 0.0,
+                    "max_score": q.marks,
+                    "correct": False,
+                    "cosine_similarity": 0.0,
+                    "keyword_coverage": 0.0,
+                    "combined_similarity": 0.0,
+                    "confidence": 0.0,
+                    "low_confidence": True,
+                    "requires_review": True,
+                    "warning": "No model answer or keywords configured on question; queued for manual review.",
+                    "details": {
+                        "method": "manual_review_queued",
+                        "warning": "No model answer or keywords configured",
+                    },
+                }
+                total_max += q.marks
+                continue
 
             # TF-IDF cosine similarity against reference
             cosine_sim = self.tfidf_scorer.cosine_similarity(student_str, ref_answer) if ref_answer else 0.0
@@ -111,9 +142,38 @@ class GradingOrchestrator:
             kw_result = self.keyword_scorer.score(student_str, q.keywords)
             kw_coverage = kw_result.get("coverage", 0.0)
 
+            tokens = [w.lower() for w in re.findall(r'\b\w+\b', student_str)]
+            num_words = len(tokens)
+
+            # Keyword stuffing mitigation:
+            # Detect list-dumps or unnatural keyword density without syntactic connectives
+            matched_kws = kw_result.get("matched", [])
+            if matched_kws and num_words > 0 and q.keywords:
+                kw_token_count = sum(1 for w in tokens if any(k.lower() in w for k in matched_kws))
+                kw_density = kw_token_count / max(num_words, 1)
+                if kw_density > 0.55 and num_words <= len(q.keywords) * 2:
+                    stuffing_penalty = max(0.25, 1.0 - (kw_density - 0.4) * 1.5)
+                    kw_coverage = kw_coverage * stuffing_penalty
+
+            # Paraphrase recognition:
+            # Check conceptual stem overlap to reward correct paraphrasing
+            if ref_answer and num_words >= 3:
+                ref_tokens = [w.lower() for w in re.findall(r'\b\w+\b', ref_answer)]
+                ref_stems = {w[:4] for w in ref_tokens if len(w) >= 3}
+                stud_stems = {w[:4] for w in tokens if len(w) >= 3}
+                if ref_stems:
+                    stem_overlap = len(ref_stems & stud_stems) / len(ref_stems)
+                    if stem_overlap > cosine_sim:
+                        cosine_sim = 0.5 * cosine_sim + 0.5 * stem_overlap
+
             # Combined score
-            combined_sim = 0.6 * cosine_sim + 0.4 * kw_coverage
+            combined_sim = 0.6 * cosine_sim + 0.4 * kw_coverage if ref_answer else kw_coverage
+            combined_sim = max(0.0, min(1.0, combined_sim))
             score = combined_sim * q.marks
+
+            # Determine confidence & queue review for ambiguous scores
+            confidence = min(1.0, max(0.0, 1.0 - abs(cosine_sim - kw_coverage)))
+            low_confidence = (not ref_answer) or (0.35 <= combined_sim <= 0.70) or (confidence < 0.5)
 
             per_question[q.id] = {
                 "score": round(score, 4),
@@ -122,10 +182,14 @@ class GradingOrchestrator:
                 "cosine_similarity": round(cosine_sim, 4),
                 "keyword_coverage": round(kw_coverage, 4),
                 "combined_similarity": round(combined_sim, 4),
+                "confidence": round(confidence, 3),
+                "low_confidence": low_confidence,
+                "requires_review": low_confidence,
                 "details": {
                     "method": "tfidf_keyword",
                     "reference": ref_answer[:100],
                     "matched_keywords": kw_result.get("matched", []),
+                    "low_confidence": low_confidence,
                 },
             }
             total_score += score

@@ -143,11 +143,62 @@
                 <div class="progress-bar">
                     <div class="progress-fill" style="width:${pct}%;${pct < 40 ? 'background:var(--danger)' : ''}"></div>
                 </div>
+                <div style="margin-top:16px;display:flex;justify-content:flex-end;">
+                    <button class="btn btn-sm btn-secondary" onclick="openAppealModal('${r.exam_id}', '${escapeHtml(r.exam_title || r.exam_id)}')">📝 File Grade Appeal</button>
+                </div>
             </div>`;
         }).join('');
     }
 
+    function openAppealModal(examId, examTitle) {
+        window._activeAppealExamId = examId;
+        const modal = document.getElementById('appeal-modal');
+        document.getElementById('appeal-exam-name').textContent = examTitle;
+        document.getElementById('appeal-reason').value = '';
+        modal.style.display = 'flex';
+    }
+
+    function closeAppealModal() {
+        document.getElementById('appeal-modal').style.display = 'none';
+    }
+
+    async function submitAppeal() {
+        const reason = document.getElementById('appeal-reason').value.trim();
+        if (!reason) {
+            alert('Please provide a reason for your appeal.');
+            return;
+        }
+        try {
+            await App.apiPost('/api/student/appeal', {
+                exam_id: window._activeAppealExamId,
+                reason: reason,
+            });
+            alert('Your grade appeal has been submitted to your examiner for review.');
+            closeAppealModal();
+        } catch (e) {
+            alert('Failed to submit appeal: ' + e.message);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', loadResults);
     </script>
+
+    <!-- Grade Appeal Modal -->
+    <div id="appeal-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;align-items:center;justify-content:center;">
+        <div class="card" style="max-width:520px;width:90%;margin:20px;">
+            <div class="card-header">
+                <div class="card-title">📝 File Grade Appeal</div>
+            </div>
+            <p style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">Submit a formal review request for <strong id="appeal-exam-name"></strong>.</p>
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">Reason for Appeal / Questions Contested</label>
+                <textarea id="appeal-reason" class="form-textarea" style="width:100%;min-height:120px;" placeholder="Describe why you believe your grade or proctoring flag should be re-evaluated..."></textarea>
+            </div>
+            <div class="form-actions" style="justify-content:flex-end;">
+                <button class="btn btn-secondary" onclick="closeAppealModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitAppeal()">Submit Appeal</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
