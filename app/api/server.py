@@ -285,9 +285,21 @@ def _load_answers_for_session(student_id: str, exam_id: str) -> dict:
     return {}
 
 
+_STUDENT_GRADED: set = set()
+
+
+def _canonical_session_id(session_id: str) -> str:
+    """Accept either a DB session id or a 'student:exam' key and return the DB session id."""
+    if session_id and ":" in session_id:
+        stu, _, ex = session_id.partition(":")
+        return _find_session_id(stu, ex) or session_id
+    return session_id
+
+
 def _apply_grade_overrides(session_id: str, per_question: dict, total_score: float) -> tuple:
     """Apply grade overrides from DB to per_question dict. Returns updated (per_question, total_score)."""
     db = _get_db()
+    session_id = _canonical_session_id(session_id)
     overrides = db.get_grade_overrides(session_id=session_id)
     for ov in overrides:
         qid = ov.get("question_id")
@@ -475,7 +487,12 @@ def get_config():
 @app.route("/api/exams", methods=["GET"])
 def list_exams():
     exams = []
+    _tok = (request.headers.get("Authorization", "") or "").replace("Bearer ", "", 1).strip()
+    _u = _get_auth_db().get_session_user(_tok) if _tok else None
+    _is_student = bool(_u and _u.get("role") == "student")
     for eid, exam in _exam_manager._exams.items():
+        if _is_student and not (_get_db().is_student_enrolled(eid, _u.get("username")) or _get_db().is_student_enrolled(eid, _u.get("user_id"))):
+            continue
         exams.append({
             "exam_id": exam.exam_id,
             "title": exam.title,
@@ -491,7 +508,7 @@ def list_exams():
 @app.route("/api/exams", methods=["POST"])
 def create_exam():
     data = request.get_json(force=True)
-    exam_id = data.get("exam_id") or data.get("id") or f"exam_{int(time.time())}"
+    exam_id = data.get("exam_id") or data.get("id") or f"exam_{uuid.uuid4().hex[:10]}"
     exam = _exam_manager.create_exam(
         exam_id=exam_id,
         title=data.get("title", "Untitled Exam"),
@@ -2617,6 +2634,7 @@ def behavioral_analyze():
             "mouse_clicks": int(mouse.get("clicks", mouse.get("click_count", 0))),
             "tab_switch": tab_switched,
             "fullscreen_exit": fs_exited,
+            "paste_detected": (delta_pastes + delta_copies + delta_cuts) > 0,
             "paste_event": delta_pastes > 0,
             "copy_event": delta_copies > 0,
             "cut_event": delta_cuts > 0,
@@ -2989,15 +3007,28 @@ def submit_answers():
         if exam:
             exam_id = exam.id
 
+    _tok = (request.headers.get("Authorization", "") or "").replace("Bearer ", "", 1).strip()
+    _cu = _get_auth_db().get_session_user(_tok) if _tok else None
+    _student_caller = bool(_cu and _cu.get("role") == "student")
+
     exam = _exam_manager.get_exam(exam_id)
     if not exam:
         all_exams = _exam_manager.list_exams()
-        if all_exams:
+        if all_exams and not _student_caller:
             exam = all_exams[0]
             exam_id = exam.id
         else:
             return jsonify({"error": "Exam not found"}), 404
 
+    # Students may submit exactly once and never see scores from this endpoint
+    # (otherwise repeated submissions could be used to brute-force the answer key).
+    if _student_caller:
+        _gk = f"{student_id}:{exam_id}"
+        _sid0 = _find_session_id(student_id, exam_id)
+        _s0 = _get_db().get_session(_sid0) if _sid0 else None
+        if _gk in _STUDENT_GRADED or (_s0 and str(_s0.get("state", "")).lower() in ("submitted", "released", "graded", "completed")):
+            return jsonify({"error": "Exam already submitted"}), 409
+        _STUDENT_GRADED.add(_gk)
 
     # Grade
     ref_answers = {}
@@ -3078,6 +3109,10 @@ def submit_answers():
         "persisted": persisted,
         "per_question": per_question_persisted if persisted else results.get("per_question", {}),
     }
+    if _student_caller:
+        return jsonify({"status": "submitted", "student_id": student_id, "exam_id": exam_id,
+                        "session_id": session_id, "submitted_at": submitted_at,
+                        "answers_count": len(answers), "persisted": persisted})
     return jsonify(response)
 
 
@@ -3154,6 +3189,7 @@ def grade_override():
         return jsonify({"error": "Scores must be numeric"}), 400
 
     db = _get_db()
+    session_id = _canonical_session_id(str(session_id))
     override_id = db.record_grade_override(
         session_id=str(session_id),
         question_id=str(question_id),
@@ -4374,6 +4410,69 @@ def server_error(e):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ---------------------------------------------------------------------------
+# Global RBAC guard: every /api route requires a valid token except the public
+# ones; staff-only routes additionally require examiner/admin; students may
+# only act on their own student_id / session_key.  Set EXAM_AGENT_AUTH_ENFORCE=0
+# to disable (used only by legacy unauthenticated tests).
+# ---------------------------------------------------------------------------
+import os as _os_rbac
+import re as _re_rbac
+
+_STAFF_ROLES = {"examiner", "admin", "super_admin"}
+_WRITE = {"POST", "PUT", "PATCH", "DELETE"}
+_PUBLIC_RULES = [
+    (None, r"^/api/health$"),
+    (None, r"^/api/config$"),
+    ({"POST"}, r"^/api/auth/(login|register)$"),
+]
+_STAFF_RULES = [
+    (_WRITE, r"^/api/exams(/.*)?$"),
+    ({"GET"}, r"^/api/exams/[^/]+/roster$"),
+    (None, r"^/api/examiner/"),
+    (None, r"^/api/grading/(override|overrides|release|inspect|plagiarism|consensus|mathematical|programming)"),
+    (None, r"^/api/(reports|predict|analytics|train|training|models|ml|demo|baseline|trace|evidence|knowledge)(/|$)"),
+    ({"GET"}, r"^/api/sessions$"),
+    (None, r"^/api/proctor/"),
+    (None, r"^/api/agent/(history|transitions)"),
+    (None, r"^/api/grade(/|$)"),
+]
+
+
+def _rule_hit(rules, method, path):
+    return any((m is None or method in m) and _re_rbac.match(rx, path) for m, rx in rules)
+
+
+@app.before_request
+def _rbac_guard():
+    if _os_rbac.environ.get("EXAM_AGENT_AUTH_ENFORCE", "1") == "0" or request.method == "OPTIONS":
+        return None
+    path = request.path
+    if not path.startswith("/api/") or _rule_hit(_PUBLIC_RULES, request.method, path):
+        return None
+    token = (request.headers.get("Authorization", "") or "").replace("Bearer ", "", 1).strip()
+    user = _get_auth_db().get_session_user(token) if token else None
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
+    role = user.get("role")
+    if _rule_hit(_STAFF_RULES, request.method, path) and role not in _STAFF_ROLES:
+        return jsonify({"error": "Forbidden: examiner or admin role required"}), 403
+    if role == "student":
+        mine = {str(user.get("username")), str(user.get("user_id"))}
+        body = request.get_json(silent=True) if request.method in _WRITE else None
+        claimed = [(request.view_args or {}).get("student_id"),
+                   (body or {}).get("student_id") if isinstance(body, dict) else None]
+        keys = [request.args.get("session_key"),
+                (body or {}).get("session_key") if isinstance(body, dict) else None]
+        for c_ in claimed:
+            if c_ and str(c_) not in mine:
+                return jsonify({"error": "Forbidden: not your session"}), 403
+        for k_ in keys:
+            if k_ and str(k_).split(":")[0] not in mine:
+                return jsonify({"error": "Forbidden: not your session"}), 403
+    return None
+
 
 if __name__ == "__main__":
     print("=" * 60)

@@ -236,13 +236,25 @@ class Database:
         # check_same_thread=False is safe here because we serialise writes via
         # _write_lock; reads in Flask worker threads are naturally serialised by
         # SQLite's reader-writer locking.
-        self._conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        self._db_file = str(DB_PATH)
+        self._local = threading.local()      # one SQLite connection per thread
         self._write_lock = threading.Lock()
         init_db(DB_PATH)
 
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = sqlite3.connect(self._db_file, timeout=30)
+            c.row_factory = sqlite3.Row
+            self._local.conn = c
+        return c
+
     def close(self) -> None:
-        self._conn.close()
+        c = getattr(self._local, "conn", None)
+        if c is not None:
+            c.close()
+            self._local.conn = None
 
     # ─── Sessions ────────────────────────────────────────────────────────────
 

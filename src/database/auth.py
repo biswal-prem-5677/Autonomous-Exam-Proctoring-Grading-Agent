@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, List
 import sqlite3
+import threading
 
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "auth.db"
 
@@ -110,13 +111,25 @@ class AuthDatabase:
         if db_path:
             DB_PATH = db_path
         _ensure_parent()
-        self._conn = sqlite3.connect(str(DB_PATH))
-        self._conn.row_factory = sqlite3.Row
+        self._db_file = str(DB_PATH)
+        self._local = threading.local()      # one SQLite connection per thread
         self._conn.executescript(AUTH_SCHEMA)
         self._conn.commit()
 
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = sqlite3.connect(self._db_file, timeout=30)
+            c.row_factory = sqlite3.Row
+            self._local.conn = c
+        return c
+
     def close(self) -> None:
-        self._conn.close()
+        c = getattr(self._local, "conn", None)
+        if c is not None:
+            c.close()
+            self._local.conn = None
 
     # ── Organizations ──────────────────────────────────────────────────────────
 

@@ -522,7 +522,8 @@ const App = {
         if (session && session.studentId && session.examId) {
             fetch(`${window.API_BASE || '/api'}/exam-sessions/${encodeURIComponent(session.studentId)}/${encodeURIComponent(session.examId)}/answers`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: Object.assign({ 'Content-Type': 'application/json' },
+                     this.authToken ? { 'Authorization': `Bearer ${this.authToken}` } : {}),
                 body: JSON.stringify({ question_id: questionId, answer }),
             }).catch(err => console.warn('[autosave] Server save failed:', err));
         }
