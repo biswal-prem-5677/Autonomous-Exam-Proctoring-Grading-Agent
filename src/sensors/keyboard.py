@@ -28,7 +28,8 @@ class KeyboardSensor:
 
         # Use pynput for cross-platform keyboard monitoring
         try:
-            from pynput import keyboard
+            import importlib
+            keyboard = importlib.import_module("pynput.keyboard")
 
             def on_press(key):
                 self._handle_activity()
@@ -36,7 +37,7 @@ class KeyboardSensor:
             self._listener = keyboard.Listener(on_press=on_press)
             self._listener.start()
             return True
-        except ImportError:
+        except (ImportError, Exception):
             # Fallback: manual polling
             self._monitor_thread = threading.Thread(
                 target=self._poll_loop, daemon=True

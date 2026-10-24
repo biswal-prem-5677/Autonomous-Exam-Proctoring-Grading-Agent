@@ -72,13 +72,13 @@ class PerformancePredictor:
         """Predict performance scores."""
         if not self._fitted:
             raise RuntimeError("Model not trained.")
-        return self.model.predict(X)
+        return self.model.predict(X)  # type: ignore
 
     def predict_ensemble(self, X: np.ndarray) -> np.ndarray:
         """Ensemble prediction combining RF and linear model."""
         rf_pred = self.model.predict(X)
-        linear_pred = self.linear_model.predict(X)
-        return 0.7 * rf_pred + 0.3 * linear_pred
+        linear_pred = self.linear_model.predict(X)  # type: ignore
+        return 0.7 * rf_pred + 0.3 * linear_pred  # type: ignore
 
     def evaluate(self, X: np.ndarray, y: np.ndarray) -> Dict:
         """Evaluate model performance."""

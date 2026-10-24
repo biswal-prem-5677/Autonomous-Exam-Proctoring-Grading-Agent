@@ -44,7 +44,7 @@ class AnomalyDetector:
 
         # Chi-squared threshold
         from scipy.stats import chi2
-        self._chi2_threshold = chi2.ppf(self.mahalanobis_confidence, df=X.shape[1])
+        self._chi2_threshold = float(chi2.ppf(self.mahalanobis_confidence, df=X.shape[1]))
         self._fitted = True
         return self
 

@@ -6,11 +6,15 @@ import queue
 from typing import Optional
 import numpy as np
 import cv2
+import cv2.data
 
 try:
     import mediapipe as mp
-    MEDIAPIPE_AVAILABLE = True
+    mp_solutions = getattr(mp, "solutions", None)
+    MEDIAPIPE_AVAILABLE = mp_solutions is not None and hasattr(mp_solutions, "face_detection")
 except ImportError:
+    mp = None  # type: ignore
+    mp_solutions = None
     MEDIAPIPE_AVAILABLE = False
 
 
@@ -25,8 +29,8 @@ class WebcamSensor:
         self._frame_queue: queue.Queue = queue.Queue(maxsize=2)
         self._capture_thread: Optional[threading.Thread] = None
 
-        if MEDIAPIPE_AVAILABLE:
-            self._face_detection = mp.solutions.face_detection.FaceDetection(
+        if MEDIAPIPE_AVAILABLE and mp_solutions is not None:
+            self._face_detection = mp_solutions.face_detection.FaceDetection(
                 model_selection=0, min_detection_confidence=confidence_threshold
             )
         else:
@@ -48,6 +52,8 @@ class WebcamSensor:
     def _capture_loop(self) -> None:
         """Background frame capture loop."""
         while self._running:
+            if self._capture is None:
+                break
             ret, frame = self._capture.read()
             if ret:
                 try:
@@ -88,7 +94,7 @@ class WebcamSensor:
             detections = self._face_cascade.detectMultiScale(
                 gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
             )
-            return [(int(x), int(y), int(w), int(h), 1.0)
+            return [(x, y, w, h, 1.0)
                     for (x, y, w, h) in detections]
 
     def stop(self) -> None:

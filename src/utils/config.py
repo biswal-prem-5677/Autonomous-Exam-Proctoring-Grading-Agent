@@ -65,7 +65,7 @@ def _apply_env_overrides(config: dict) -> None:
         if value is not None:
             if config.get(section) is None:
                 config[section] = {}
-            config[section][key] = cast_type(value)
+            config[section][key] = value if cast_type is str else cast_type(value)
 
 
 # Singleton config instance
