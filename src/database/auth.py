@@ -121,6 +121,8 @@ class AuthDatabase:
         c = getattr(self._local, "conn", None)
         if c is None:
             c = sqlite3.connect(self._db_file, timeout=30)
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA busy_timeout=30000")
             c.row_factory = sqlite3.Row
             self._local.conn = c
         return c

@@ -16,13 +16,13 @@ class AgentStateMachine:
     VALID_TRANSITIONS = {
         AgentState.NORMAL: [AgentState.MONITOR, AgentState.TECHNICAL_EVENT,
                             AgentState.SUSPICIOUS],
-        AgentState.MONITOR: [AgentState.NORMAL, AgentState.SUSPICIOUS],
-        AgentState.SUSPICIOUS: [AgentState.NORMAL, AgentState.HIGH_RISK,
-                               AgentState.INSUFFICIENT_EVIDENCE],
-        AgentState.HIGH_RISK: [AgentState.REVIEW_REQUIRED, AgentState.SUSPICIOUS],
-        AgentState.REVIEW_REQUIRED: [AgentState.NORMAL, AgentState.SUSPICIOUS],
-        AgentState.TECHNICAL_EVENT: [AgentState.NORMAL],
-        AgentState.INSUFFICIENT_EVIDENCE: [AgentState.NORMAL, AgentState.MONITOR],
+        AgentState.MONITOR: [AgentState.NORMAL, AgentState.SUSPICIOUS, AgentState.REVIEW_REQUIRED],
+        AgentState.SUSPICIOUS: [AgentState.NORMAL, AgentState.REVIEW_REQUIRED,
+                               AgentState.HIGH_RISK, AgentState.INSUFFICIENT_EVIDENCE],
+        AgentState.HIGH_RISK: [AgentState.REVIEW_REQUIRED, AgentState.SUSPICIOUS, AgentState.NORMAL],
+        AgentState.REVIEW_REQUIRED: [AgentState.NORMAL, AgentState.SUSPICIOUS, AgentState.MONITOR],
+        AgentState.TECHNICAL_EVENT: [AgentState.NORMAL, AgentState.MONITOR],
+        AgentState.INSUFFICIENT_EVIDENCE: [AgentState.NORMAL, AgentState.MONITOR, AgentState.SUSPICIOUS],
     }
 
     def __init__(self, initial_state: AgentState = AgentState.NORMAL):

@@ -493,10 +493,40 @@ class TestAgentStateMachine:
         assert sm.state == AgentState.NORMAL
         assert sm.duration == 0.0
 
-    def test_tick(self):
+    def test_transition_to_review_required(self):
         sm = AgentStateMachine()
-        sm.tick(5.0)
-        assert sm.duration == 5.0
+        assert sm.transition(AgentState.SUSPICIOUS) is True
+        assert sm.transition(AgentState.REVIEW_REQUIRED) is True
+        assert sm.state == AgentState.REVIEW_REQUIRED
+
+    def test_canonical_states_progression(self):
+        canonical_states = {
+            AgentState.NORMAL,
+            AgentState.MONITOR,
+            AgentState.SUSPICIOUS,
+            AgentState.REVIEW_REQUIRED,
+            AgentState.TECHNICAL_EVENT,
+            AgentState.INSUFFICIENT_EVIDENCE,
+        }
+        for st in canonical_states:
+            assert isinstance(st.value, str)
+
+        # Progression: NORMAL -> MONITOR -> SUSPICIOUS -> REVIEW_REQUIRED -> NORMAL
+        sm = AgentStateMachine()
+        assert sm.transition(AgentState.MONITOR) is True
+        assert sm.transition(AgentState.SUSPICIOUS) is True
+        assert sm.transition(AgentState.REVIEW_REQUIRED) is True
+        assert sm.transition(AgentState.NORMAL) is True
+        assert sm.state == AgentState.NORMAL
+
+        # Progression: NORMAL -> TECHNICAL_EVENT -> NORMAL
+        assert sm.transition(AgentState.TECHNICAL_EVENT) is True
+        assert sm.transition(AgentState.NORMAL) is True
+
+        # Progression: NORMAL -> SUSPICIOUS -> INSUFFICIENT_EVIDENCE -> NORMAL
+        assert sm.transition(AgentState.SUSPICIOUS) is True
+        assert sm.transition(AgentState.INSUFFICIENT_EVIDENCE) is True
+        assert sm.transition(AgentState.NORMAL) is True
 
 
 class TestProctoringAgent:

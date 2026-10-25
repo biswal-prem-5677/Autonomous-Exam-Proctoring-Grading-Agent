@@ -34,15 +34,7 @@ class AgentPhase(Enum):
     ACT = "ACT"
 
 
-class AgentState(Enum):
-    """Agent risk states."""
-    NORMAL = "NORMAL"
-    MONITOR = "MONITOR"
-    SUSPICIOUS = "SUSPICIOUS"
-    HIGH_RISK = "HIGH_RISK"
-    REVIEW_REQUIRED = "REVIEW_REQUIRED"
-    TECHNICAL_EVENT = "TECHNICAL_EVENT"
-    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+from src.models.models import AgentState
 
 
 class ProctoringAgent:
@@ -453,8 +445,13 @@ class ProctoringAgent:
             w = compute_context_weight(evt["type"], self.context, source)
             self.evidence_memory.add_event(evt["type"], evt["confidence"] * w)
 
-        # Base risk from evidence memory
-        risk = self.risk_engine.compute_risk(self.evidence_memory)
+        # Base risk from evidence memory + canonical features
+        risk = self.risk_engine.compute_risk(
+            self.evidence_memory,
+            context=self.context,
+            baseline=self.baseline,
+            features=features,
+        )
 
         # Personal baseline deviation
         baseline_deviations = self.baseline.compute_all_deviations(signals)
@@ -463,14 +460,16 @@ class ProctoringAgent:
         if maturity >= 0.4 and max_dev > 0.5:
             risk = min(risk + 0.15 * max_dev * maturity, 1.0)
 
-        # Fuse with ML predictions
-        logistic = predictions.get("logistic_risk")
-        if logistic is not None:
-            risk = 0.55 * risk + 0.45 * logistic
+        # Fuse with ML predictions if not already refined inside risk_engine
+        if self.risk_engine._logistic_model is None:
+            logistic = predictions.get("logistic_risk")
+            if logistic is not None:
+                risk = 0.55 * risk + 0.45 * logistic
 
-        anomaly = predictions.get("anomaly_score")
-        if anomaly is not None and anomaly > 0.5:
-            risk = min(risk + 0.1 * anomaly, 1.0)
+        if self.risk_engine._anomaly_model is None:
+            anomaly = predictions.get("anomaly_score")
+            if anomaly is not None and anomaly > 0.5:
+                risk = min(risk + 0.1 * anomaly, 1.0)
 
         evidence_score = min(max(risk, 0.0), 1.0)
 
@@ -563,7 +562,7 @@ class ProctoringAgent:
 
         # 3. Risk-based escalation
         if risk_score >= escalation:
-            new_state = AgentState.HIGH_RISK
+            new_state = AgentState.REVIEW_REQUIRED
         elif risk_score >= review:
             if active_signals >= multi_signal:
                 new_state = AgentState.SUSPICIOUS
@@ -599,7 +598,7 @@ class ProctoringAgent:
                 self._on_alert(state.value, risk_score, events)
             actions.append(f"alert:{state.value}")
 
-        if state == AgentState.HIGH_RISK:
+        if state in (AgentState.HIGH_RISK, AgentState.REVIEW_REQUIRED):
             actions.append("escalated")
         elif state == AgentState.SUSPICIOUS:
             actions.append("monitoring")

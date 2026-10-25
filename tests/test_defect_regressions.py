@@ -470,12 +470,31 @@ def test_models_hot_swap_and_adversarial_apis(client):
 
 # ── Honest Performance Prediction Confidence Bounds ─────────────────────────
 
-def test_honest_performance_prediction_bounds(client):
-    # Endpoint returns model version and prediction bounds
-    res = client.get("/api/analytics/predict-performance?student_id=test_student_honest")
+def test_honest_performance_prediction_insufficient_data(client):
+    # Without sufficient historical sessions, endpoint honestly reports insufficient_data
+    res = client.get("/api/analytics/predict-performance?student_id=unknown_student_999")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["status"] == "insufficient_data"
+    assert data["prediction"] is None
+    assert data["prediction_model_version"] == "v1.0.0-rf-linear-ensemble"
+    assert data["prediction_interval"]["confidence_level"] == 0.95
+
+
+def test_honest_performance_prediction_with_real_history(client):
+    # Seed 3 real completed sessions with answers in DB for PerformancePredictor training
+    from app.api.server import _get_db
+    db = _get_db()
+    for i in range(3):
+        sid = db.create_session(student_id="student_real", exam_id="exam_pred_1")
+        db.record_answer(sid, f"q{i}", "correct", score=10.0 + i * 5.0, max_score=20.0)
+
+    res = client.get("/api/analytics/predict-performance?student_id=student_real")
     assert res.status_code == 200
     data = res.get_json()
     assert data["status"] == "success"
-    assert "prediction_model_version" in data
+    assert data["prediction_model_version"] == "v1.0.0-rf-linear-ensemble"
+    assert isinstance(data["prediction"], (int, float))
     assert "prediction_interval" in data
     assert data["prediction_interval"]["confidence_level"] == 0.95
+    assert data["prediction_interval"]["lower_bound"] <= data["prediction"] <= data["prediction_interval"]["upper_bound"]

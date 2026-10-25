@@ -189,7 +189,9 @@ def init_db(db_path: Optional[Path] = None) -> None:
     if db_path:
         DB_PATH = db_path
     _ensure_parent()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(SCHEMA)
     # Migrate exam_questions to composite primary key if needed
     try:
@@ -246,6 +248,8 @@ class Database:
         c = getattr(self._local, "conn", None)
         if c is None:
             c = sqlite3.connect(self._db_file, timeout=30)
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA busy_timeout=30000")
             c.row_factory = sqlite3.Row
             self._local.conn = c
         return c
@@ -307,20 +311,27 @@ class Database:
                      keywords: Optional[List[str]] = None, reference_answer: Optional[str] = None,
                      options: Optional[List[str]] = None, position: int = 0) -> None:
         with self._write_lock:
-            self._conn.execute(
-                """INSERT INTO questions
-                   (question_id, session_id, type, text, options, correct_answer,
-                    marks, tolerance, keywords, reference_answer, position)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    question_id, session_id, qtype, text,
-                    json.dumps(options) if options else None,
-                    correct_answer, marks, tolerance,
-                    json.dumps(keywords) if keywords else None,
-                    reference_answer, position,
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    """INSERT OR REPLACE INTO questions
+                       (question_id, session_id, type, text, options, correct_answer,
+                        marks, tolerance, keywords, reference_answer, position)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        question_id, session_id, qtype, text,
+                        json.dumps(options) if options else None,
+                        correct_answer, marks, tolerance,
+                        json.dumps(keywords) if keywords else None,
+                        reference_answer, position,
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
+                raise
 
     def get_questions(self, session_id: str) -> List[Dict[str, Any]]:
         rows = self._conn.execute(
@@ -535,6 +546,7 @@ class Database:
         passing_score = float(exam_data.get("passing_score", 40.0))
         is_released = 1 if exam_data.get("is_released") else 0
         settings = exam_data.get("settings", {})
+        created_by = created_by or exam_data.get("created_by")
         
         with self._write_lock:
             self._conn.execute(
@@ -551,6 +563,7 @@ class Database:
                        passing_score    = excluded.passing_score,
                        is_released      = excluded.is_released,
                        settings         = excluded.settings,
+                       created_by       = COALESCE(excluded.created_by, exams.created_by),
                        updated_at       = datetime('now')""",
                 (
                     exam_id, title, duration, topic, difficulty, instructions,

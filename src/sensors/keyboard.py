@@ -37,13 +37,23 @@ class KeyboardSensor:
             self._listener = keyboard.Listener(on_press=on_press)
             self._listener.start()
             return True
-        except (ImportError, Exception):
+        except (ImportError, ModuleNotFoundError) as e:
+            import logging
+            logging.getLogger(__name__).info(f"pynput not available ({e}); using polling fallback for keyboard monitoring")
             # Fallback: manual polling
             self._monitor_thread = threading.Thread(
                 target=self._poll_loop, daemon=True
             )
             self._monitor_thread.start()
             return True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Unexpected error starting pynput keyboard listener: {e}", exc_info=True)
+            self._monitor_thread = threading.Thread(
+                target=self._poll_loop, daemon=True
+            )
+            self._monitor_thread.start()
+            return False
 
     def _handle_activity(self) -> None:
         """Record keyboard activity."""

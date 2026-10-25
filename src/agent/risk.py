@@ -23,6 +23,7 @@ from src.ml.anomaly import AnomalyDetector
 from src.context import ExamContext, compute_context_weight
 from src.baseline import StudentBaseline
 from src.fusion import compute_corroboration, CorroborationSignal, ModalitySource
+from src.features.canonical import extract_canonical_features, CANONICAL_FEATURE_NAMES, N_CANONICAL_FEATURES
 
 
 class RiskEngine:
@@ -114,6 +115,7 @@ class RiskEngine:
         memory: EvidenceMemory,
         context: Optional[ExamContext] = None,
         baseline: Optional[StudentBaseline] = None,
+        features: Optional[np.ndarray] = None,
     ) -> float:
         """Compute overall risk score from all evidence sources.
 
@@ -200,26 +202,52 @@ class RiskEngine:
             persistence_boost = 0.08 * min(base_risk, evidence_score)
         decayed_risk += persistence_boost
 
-        # ML refinement
-        if self._logistic_model is not None:
-            features = self._build_feature_vector(event_counts,
-                                                   memory.get_signal_summary())
-            if features is not None and features.sum() > 0:
+        # ML refinement using authoritative canonical 22D feature vector
+        canonical_features = features
+        if canonical_features is None:
+            face_absent_cnt = event_counts.get("face_absent", 0)
+            multi_face_cnt = event_counts.get("multiple_faces", 0)
+            speech_cnt = event_counts.get("speech_detected", 0)
+            loud_cnt = event_counts.get("loud_audio", 0)
+            signals_snapshot = {
+                "face_present": (face_absent_cnt == 0),
+                "face_confidence": 0.10 if face_absent_cnt > 0 else 0.95,
+                "face_count": 2.0 if multi_face_cnt > 0 else (0.0 if face_absent_cnt > 0 else 1.0),
+                "absence_ratio": min(1.0, face_absent_cnt * 0.2),
+                "head_pose": {
+                    "yaw": 50.0 if event_counts.get("head_turned", 0) > 0 else 0.0,
+                    "pitch": 40.0 if event_counts.get("gaze_away", 0) > 0 else 0.0,
+                    "roll": 0.0,
+                },
+                "audio_features": {
+                    "rms_energy": 0.70 if loud_cnt > 0 else (0.35 if speech_cnt > 0 else 0.05),
+                    "volume_db": -20.0 if loud_cnt > 0 else (-40.0 if speech_cnt > 0 else -60.0),
+                    "zero_crossing_rate": 0.30 if speech_cnt > 0 else 0.05,
+                    "spectral_centroid": 2000.0,
+                },
+                "keyboard_idle_seconds": 15.0 if event_counts.get("idle_keyboard", 0) > 0 else 0.0,
+                "keyboard_events_per_minute": 160.0 if event_counts.get("rapid_typing", 0) > 0 else 60.0,
+                "mouse_avg_speed": 400.0 if event_counts.get("rapid_movement", 0) > 0 else 100.0,
+                "mouse_total_distance": 500.0,
+                "mouse_click_count": 5.0,
+                "mouse_idle_seconds": 15.0 if event_counts.get("idle_mouse", 0) > 0 else 0.0,
+                "multi_face_events": multi_face_cnt,
+                "session_progress": min(1.0, float(memory.get_signal_summary().get("temporal", 0.1))),
+            }
+            canonical_features = extract_canonical_features(signals_snapshot)
+
+        if canonical_features is not None and len(canonical_features) == N_CANONICAL_FEATURES:
+            f_vec = canonical_features.reshape(1, -1)
+            if self._logistic_model is not None and canonical_features.sum() > 0:
                 try:
-                    ml_proba = self._logistic_model.predict_proba(
-                        features.reshape(1, -1)
-                    )[0]
+                    ml_proba = self._logistic_model.predict_proba(f_vec)[0]
                     decayed_risk = 0.55 * decayed_risk + 0.45 * ml_proba
                 except Exception:
                     pass
 
-        # Anomaly boost
-        if self._anomaly_model is not None:
-            features = self._build_feature_vector(event_counts,
-                                                   memory.get_signal_summary())
-            if features is not None and features.sum() > 0:
+            if self._anomaly_model is not None and canonical_features.sum() > 0:
                 try:
-                    score = self._anomaly_model.score(features.reshape(1, -1))[0]
+                    score = self._anomaly_model.score(f_vec)[0]
                     if score > 0.5:
                         decayed_risk = min(decayed_risk + 0.1 * score, 1.0)
                 except Exception:
@@ -256,64 +284,6 @@ class RiskEngine:
             dev, _ = baseline.deviation_mouse(0.0)
             return dev
         return 0.0
-
-    def _build_feature_vector(self, event_counts: dict,
-                              signal_summary: dict,
-                              expected_dim: Optional[int] = None) -> Optional[np.ndarray]:
-        """Build feature vector for ML model matching trained feature dimensions."""
-        if expected_dim is None and self._logistic_model is not None and hasattr(self._logistic_model, "weights") and self._logistic_model.weights is not None:
-            expected_dim = len(self._logistic_model.weights)
-        if expected_dim is None:
-            expected_dim = 22
-
-        if expected_dim == 22:
-            # Full 22-dimensional feature vector matching TrainingDataGenerator
-            face_absent_cnt = event_counts.get("face_absent", 0)
-            multi_face_cnt = event_counts.get("multiple_faces", 0)
-            speech_cnt = event_counts.get("speech_detected", 0)
-            loud_cnt = event_counts.get("loud_audio", 0)
-
-            face_present = 0.0 if face_absent_cnt > 0 else 1.0
-            face_conf = 0.1 if face_absent_cnt > 0 else 0.95
-            face_cnt = min(4.0, 2.0 if multi_face_cnt > 0 else (0.0 if face_absent_cnt > 0 else 1.0))
-            absence_ratio = min(1.0, face_absent_cnt * 0.2)
-            head_yaw = 0.6 if event_counts.get("head_turned", 0) > 0 else 0.0
-            head_pitch = 0.5 if event_counts.get("gaze_away", 0) > 0 else 0.0
-            head_roll = 0.0
-            audio_rms = 0.7 if loud_cnt > 0 else (0.4 if speech_cnt > 0 else 0.05)
-            audio_db = float(np.clip(float(signal_summary.get("audio", 0.0)), 0.0, 1.0))
-            audio_zcr = 0.3 if speech_cnt > 0 else 0.05
-            audio_thresh = 1.0 if (loud_cnt > 0 or speech_cnt > 0) else 0.0
-            spectral_centroid = 0.5
-            kb_idle = 1.0 if event_counts.get("idle_keyboard", 0) > 0 else 0.0
-            keystroke_rate = 0.8 if event_counts.get("rapid_typing", 0) > 0 else 0.4
-            key_hold = 0.12
-            key_lat = 0.10
-            mouse_spd = 0.8 if event_counts.get("rapid_movement", 0) > 0 else 0.3
-            mouse_dist = 0.3
-            click_rate = 0.1
-            mouse_idle = 1.0 if event_counts.get("idle_mouse", 0) > 0 else 0.0
-            multi_events = min(1.0, float(multi_face_cnt) / 5.0)
-            progress = min(1.0, float(signal_summary.get("temporal", 0.1)))
-
-            features = [
-                face_present, face_conf, face_cnt, absence_ratio,
-                head_yaw, head_pitch, head_roll,
-                audio_rms, audio_db, audio_zcr, audio_thresh, spectral_centroid,
-                kb_idle, keystroke_rate, key_hold, key_lat,
-                mouse_spd, mouse_dist, click_rate, mouse_idle,
-                multi_events, progress
-            ]
-            return np.array(features, dtype=float)
-
-        # Fallback 10-feature vector if model specifically expects 10 features
-        features = []
-        for signal in ['vision', 'audio', 'keyboard', 'mouse', 'temporal']:
-            features.append(signal_summary.get(signal, 0.0))
-        for event in ['face_absent', 'multiple_faces', 'copy_paste',
-                      'speech_detected', 'fullscreen_exit']:
-            features.append(event_counts.get(event, 0.0))
-        return np.array(features, dtype=float)
 
     def compute_risk_decay(self, previous_risk: float, new_evidence: float) -> float:
         """Apply risk decay: R_t = alpha * R_{t-1} + (1-alpha) * E_t"""

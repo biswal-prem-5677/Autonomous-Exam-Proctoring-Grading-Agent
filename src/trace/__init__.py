@@ -425,7 +425,7 @@ def build_explainability_trace(
         "MONITOR": DecisionOutcome.MONITOR,
         "SUSPICIOUS": DecisionOutcome.REVIEW_REQUIRED,
         "HIGH_RISK": DecisionOutcome.HIGH_PRIORITY_REVIEW,
-        "REVIEW_REQUIRED": DecisionOutcome.REVIEW_REQUIRED,
+        "REVIEW_REQUIRED": DecisionOutcome.HIGH_PRIORITY_REVIEW,
         "TECHNICAL_EVENT": DecisionOutcome.TECHNICAL_EVENT,
         "INSUFFICIENT_EVIDENCE": DecisionOutcome.INSUFFICIENT_EVIDENCE,
     }

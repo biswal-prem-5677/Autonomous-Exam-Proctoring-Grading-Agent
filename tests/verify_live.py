@@ -47,7 +47,6 @@ for route in ["/", "/student", "/exam", "/examiner", "/examiner/grading",
               "/dashboard", "/login", "/register", "/sessions", "/monitor", "/training"]:
     r = get(route)
     check(f"Page {route}", r.status_code == 200, f"len={len(r.data)}")
-    # Verify HTML content
     check(f"  {route} returns HTML", b"<html" in r.data.lower() or b"<!doctype" in r.data.lower())
 
 # ── 3. Authentication ─────────────────────────────────────────────────────────
@@ -87,23 +86,29 @@ login_data = d if isinstance(d, dict) else {}
 r = post("/api/auth/login", {"username": "v_stud", "password": "wrong"})
 check("Login rejects bad password", r.status_code == 401, f"status={r.status_code}")
 
-r = get("/api/auth/users")
-check("List users (auth protected)", r.status_code == 200 or r.status_code == 401,
-      f"status={r.status_code}")
+exam_headers = {"Authorization": f"Bearer {exam_token}"}
+stud_headers = {"Authorization": f"Bearer {stud_token}"}
+
+r = get("/api/auth/users", headers=exam_headers)
+check("List users (auth protected)", r.status_code == 200, f"status={r.status_code}")
 
 # ── 4. Exam CRUD ──────────────────────────────────────────────────────────────
 print("\n── 4. Exam CRUD ──")
 
 r = post("/api/exams", {
     "title": "Verify Exam", "description": "Phase 1 test",
-    "duration_minutes": 30, "created_by": "v_exam"
-})
+    "duration_minutes": 30, "created_by": "v_exam",
+    "questions": [
+        {"id": "q1", "type": "mcq", "text": "2+2?", "options": ["3","4","5"], "correct_answer": "4", "marks": 1.0},
+        {"id": "q2", "type": "numerical", "text": "Pi?", "correct_answer": "3.14", "tolerance": 0.01, "marks": 1.0},
+    ]
+}, headers=exam_headers)
 d = r.get_json()
 check("Create exam", r.status_code in (200, 201), f"status={r.status_code}")
 exam_id = d.get("exam_id", "") if isinstance(d, dict) else ""
 
 if not exam_id:
-    r = get("/api/exams")
+    r = get("/api/exams", headers=exam_headers)
     d = r.get_json()
     if isinstance(d, dict) and d.get("exams"):
         exam_id = d["exams"][0]["exam_id"]
@@ -113,7 +118,11 @@ if not exam_id:
 check(f"Got exam_id: {exam_id}", bool(exam_id))
 
 if exam_id:
-    r = get(f"/api/exams/{exam_id}")
+    # Enroll student in roster and release exam so student can take it
+    post(f"/api/exams/{exam_id}/roster", {"student_id": "v_stud"}, headers=exam_headers)
+    post(f"/api/exams/{exam_id}/release", {"is_released": True}, headers=exam_headers)
+
+    r = get(f"/api/exams/{exam_id}", headers=exam_headers)
     d = r.get_json()
     check("Get exam by ID", r.status_code == 200 and isinstance(d, dict), f"status={r.status_code}")
     if isinstance(d, dict):
@@ -122,7 +131,7 @@ if exam_id:
 # ── 5. Exam Session ───────────────────────────────────────────────────────────
 print("\n── 5. Exam Session ──")
 
-r = post("/api/exam-sessions", {"exam_id": exam_id or "exam_001", "student_id": "v_stud"})
+r = post("/api/exam-sessions", {"exam_id": exam_id or "exam_001", "student_id": "v_stud"}, headers=stud_headers)
 d = r.get_json()
 check("Create exam session", r.status_code in (200, 201), f"status={r.status_code}")
 session_key = d.get("session_key", "") if isinstance(d, dict) else ""
@@ -135,7 +144,7 @@ r = post("/api/vision/analyze", {
     "session_key": session_key or "default",
     "face_present": True, "face_count": 1, "face_confidence": 0.9,
     "head_pose": {"yaw": 0, "pitch": 0, "roll": 0},
-})
+}, headers=stud_headers)
 d = r.get_json()
 check("Vision /api/vision/analyze", r.status_code == 200, f"status={r.status_code}")
 if isinstance(d, dict):
@@ -151,7 +160,7 @@ r = post("/api/vision/analyze", {
     "session_key": session_key or "default",
     "face_present": False, "face_count": 0, "face_confidence": 0.1,
     "head_pose": {"yaw": 0, "pitch": 0, "roll": 0},
-})
+}, headers=stud_headers)
 d = r.get_json()
 check("Vision: face_absent event generated", r.status_code == 200, f"status={r.status_code}")
 if isinstance(d, dict):
@@ -163,7 +172,7 @@ r = post("/api/vision/analyze", {
     "session_key": session_key or "default",
     "face_present": True, "face_count": 2, "face_confidence": 0.9,
     "head_pose": {"yaw": 0, "pitch": 0, "roll": 0},
-})
+}, headers=stud_headers)
 d = r.get_json()
 if isinstance(d, dict):
     event_types = [e.get("type") for e in d.get("events", [])]
@@ -174,7 +183,7 @@ r = post("/api/vision/analyze", {
     "session_key": session_key or "default",
     "face_present": True, "face_count": 1, "face_confidence": 0.9,
     "head_pose": {"yaw": 60, "pitch": 0, "roll": 0},
-})
+}, headers=stud_headers)
 d = r.get_json()
 if isinstance(d, dict):
     event_types = [e.get("type") for e in d.get("events", [])]
@@ -191,7 +200,7 @@ r = post("/api/behavioral/analyze", {
     "mouse": {"avg_speed": 100, "total_distance": 500, "idle_seconds": 10, "deviation": 0.1},
     "browser": {"tab_switches": 0, "window_blurs": 0, "fullscreen_exits": 0, "visibility_changes": 0},
     "session_elapsed": 300,
-})
+}, headers=stud_headers)
 d = r.get_json()
 check("Behavioral /api/behavioral/analyze", r.status_code == 200, f"status={r.status_code}")
 if isinstance(d, dict):
@@ -211,27 +220,27 @@ r = post("/api/behavioral/analyze", {
     "mouse": {"avg_speed": 100, "total_distance": 500, "idle_seconds": 10, "deviation": 0.1},
     "browser": {"tab_switches": 5, "window_blurs": 0, "fullscreen_exits": 0, "visibility_changes": 0},
     "session_elapsed": 300,
-})
+}, headers=stud_headers)
 d = r.get_json()
 if isinstance(d, dict):
     check(f"  High tab_switches anomaly_score: {d.get('anomaly_score')}",
           isinstance(d.get("anomaly_score"), (int, float)))
 
-# ── 8. Agent API ────────────────────────────────────────────────────��─────────
+# ── 8. Agent API ─────────────────────────────────────────────────────────────
 print("\n── 8. Agent API ──")
 
-r = get(f"/api/agent/status?session_key={session_key or 'default'}")
+r = get(f"/api/agent/status?session_key={session_key or 'default'}", headers=stud_headers)
 d = r.get_json()
 check("Agent /api/agent/status", r.status_code == 200, f"status={r.status_code}")
 if isinstance(d, dict):
     check("  Returns state", "state" in d or "running" in d)
     check("  Returns risk", "current_risk" in d or "risk_score" in d)
 
-r = get(f"/api/agent/history?session_key={session_key or 'default'}")
+r = get(f"/api/agent/history?session_key={session_key or 'default'}", headers=exam_headers)
 d = r.get_json()
 check("Agent /api/agent/history", r.status_code == 200, f"status={r.status_code}")
 
-r = get("/api/agent/transitions")
+r = get("/api/agent/transitions", headers=exam_headers)
 d = r.get_json()
 check("Agent /api/agent/transitions", r.status_code == 200, f"status={r.status_code}")
 
@@ -241,16 +250,16 @@ print("\n── 9. Proctoring API ──")
 r = post(f"/api/proctor/process/v_stud/{exam_id or 'exam_001'}", {
     "session_key": session_key or "default",
     "signals": {"face_present": True, "tab_switch": False},
-})
+}, headers=exam_headers)
 check("Proctor process", r.status_code in (200, 201), f"status={r.status_code}")
 
-r = get(f"/api/proctor/status/v_stud/{exam_id or 'exam_001'}")
+r = get(f"/api/proctor/status/v_stud/{exam_id or 'exam_001'}", headers=exam_headers)
 check("Proctor status", r.status_code == 200, f"status={r.status_code}")
 
-r = get(f"/api/proctor/history/v_stud/{exam_id or 'exam_001'}")
+r = get(f"/api/proctor/history/v_stud/{exam_id or 'exam_001'}", headers=exam_headers)
 check("Proctor history", r.status_code == 200, f"status={r.status_code}")
 
-r = get(f"/api/proctor/evidence/v_stud/{exam_id or 'exam_001'}")
+r = get(f"/api/proctor/evidence/v_stud/{exam_id or 'exam_001'}", headers=exam_headers)
 check("Proctor evidence", r.status_code == 200, f"status={r.status_code}")
 
 # ── 10. Grading API ───────────────────────────────────────────────────────────
@@ -258,8 +267,8 @@ print("\n── 10. Grading API ──")
 
 r = post("/api/grading/submit", {
     "session_key": session_key or "default",
-    "answers": {"q1": "4", "q2": "3.14", "q3": "photosynthesis is the process by which plants convert sunlight into energy"},
-})
+    "answers": {"q1": "4", "q2": "3.14"},
+}, headers=stud_headers)
 check("Grading submit", r.status_code in (200, 201), f"status={r.status_code}")
 if r.status_code in (200, 201):
     d = r.get_json()
@@ -272,7 +281,7 @@ r = post("/api/grade", {
         {"id": "q2", "type": "numerical", "text": "Pi?", "correct_answer": "3.14", "tolerance": 0.01, "marks": 1.0},
     ],
     "reference": {"q1": "4", "q2": "3.14"},
-})
+}, headers=exam_headers)
 check("Grade endpoint", r.status_code in (200, 201), f"status={r.status_code}")
 
 # ── 11. Reports ───────────────────────────────────────────────────────────────
@@ -280,24 +289,24 @@ print("\n── 11. Reports ──")
 
 r = post("/api/reports/student", {
     "student_id": "v_stud", "exam_id": exam_id or "exam_001"
-})
+}, headers=exam_headers)
 check("Student report", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/reports/examiner", {
     "exam_id": exam_id or "exam_001"
-})
+}, headers=exam_headers)
 check("Examiner report", r.status_code == 200, f"status={r.status_code}")
 
 # ── 12. Training API ──────────────────────────────────────────────────────────
 print("\n── 12. Training API ──")
 
-r = post("/api/train/generate-data", {"n_normal": 10, "n_suspicious": 10})
+r = post("/api/train/generate-data", {"n_normal": 10, "n_suspicious": 10}, headers=exam_headers)
 check("Train generate-data", r.status_code == 200, f"status={r.status_code}")
 
-r = post("/api/train/models", {"n_normal": 10, "n_suspicious": 10})
+r = post("/api/train/models", {"n_normal": 10, "n_suspicious": 10}, headers=exam_headers)
 check("Train models", r.status_code == 200, f"status={r.status_code}")
 
-r = post("/api/train/evaluate", {})
+r = post("/api/train/evaluate", {}, headers=exam_headers)
 check("Train evaluate", r.status_code in (200, 400), f"status={r.status_code}")
 
 # ── 13. Prediction API ───────────────────────────────────────────────────────
@@ -306,27 +315,27 @@ print("\n── 13. Prediction API ──")
 r = post("/api/predict/performance", {
     "student_id": "v_stud",
     "features": [0.5, 0.3, 0.8, 0.2]
-})
+}, headers=exam_headers)
 check("Predict performance", r.status_code == 200, f"status={r.status_code}")
 
 r = post("/api/predict/difficulty", {
     "responses": [1, 0, 1, 1, 0, 1, 1, 1, 0, 1]
-})
+}, headers=exam_headers)
 check("Predict difficulty", r.status_code == 200, f"status={r.status_code}")
 
 # ── 14. Demo API ──────────────────────────────────────────────────────────────
 print("\n── 14. Demo API ──")
 
-r = post("/api/demo/setup", {})
+r = post("/api/demo/setup", {}, headers=exam_headers)
 check("Demo setup", r.status_code == 200, f"status={r.status_code}")
 
-r = post("/api/demo/generate-answers", {"student_id": "v_stud"})
+r = post("/api/demo/generate-answers", {"student_id": "v_stud", "exam_id": exam_id or "exam_001"}, headers=exam_headers)
 check("Demo generate-answers", r.status_code == 200, f"status={r.status_code}")
 
 # ── 15. Dashboard & Config ────────────────────────────────────────────────────
 print("\n── 15. Dashboard & Config ──")
 
-r = get("/api/dashboard")
+r = get("/api/dashboard", headers=exam_headers)
 check("Dashboard API", r.status_code in (200, 401), f"status={r.status_code}")
 
 r = get("/api/config")
@@ -338,25 +347,25 @@ if r.status_code == 200:
 # ── 16. Evidence API ──────────────────────────────────────────────────────────
 print("\n── 16. Evidence ──")
 
-r = get(f"/api/evidence/{session_key or 'default'}", headers={"Authorization": f"Bearer {exam_token}"} if exam_token else None)
+r = get(f"/api/evidence/{session_key or 'default'}", headers=exam_headers)
 check("Evidence endpoint", r.status_code == 200, f"status={r.status_code}")
 
 # ── 17. Organization API ──────────────────────────────────────────────────────
 print("\n── 17. Organizations ──")
 
-r = get("/api/orgs")
+r = get("/api/orgs", headers=exam_headers)
 check("List orgs", r.status_code in (200, 401), f"status={r.status_code}")
 
-r = post("/api/orgs", {"name": "Test University", "admin_id": "v_exam", "org_type": "university"})
+r = post("/api/orgs", {"name": "Test University", "admin_id": "v_exam", "org_type": "university"}, headers=exam_headers)
 check("Create org", r.status_code in (200, 201, 401), f"status={r.status_code}")
 
 # ── 18. Examiner-specific ─────────────────────────────────────────────────────
 print("\n── 18. Examiner Endpoints ──")
 
-r = get(f"/api/examiner/exam/{exam_id or 'exam_001'}/overview")
+r = get(f"/api/examiner/exam/{exam_id or 'exam_001'}/overview", headers=exam_headers)
 check("Examiner exam overview", r.status_code in (200, 404), f"status={r.status_code}")
 
-r = get(f"/api/examiner/student/v_stud/{exam_id or 'exam_001'}")
+r = get(f"/api/examiner/student/v_stud/{exam_id or 'exam_001'}", headers=exam_headers)
 check("Examiner student detail", r.status_code in (200, 404), f"status={r.status_code}")
 
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
@@ -380,3 +389,4 @@ if failed == 0:
     print("\n  *** ALL CHECKS PASSED ***")
 else:
     print(f"\n  *** {failed} CHECK(S) FAILED ***")
+    sys.exit(1)

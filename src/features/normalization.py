@@ -34,23 +34,34 @@ class FeatureNormalizer:
             return (X - self._mean) / self._std
 
         # Running update
-        total = self._count + X.shape[0]
-        delta_mean = np.mean(X, axis=0) - self._mean
-        self._mean += delta_mean * (X.shape[0] / total)
+        if self._mean is None or self._std is None:
+            self._mean = np.mean(X, axis=0)
+            self._std = np.std(X, axis=0)
+            self._std[self._std == 0] = 1.0
+            self._count = X.shape[0]
+            self._initialized = True
+            return (X - self._mean) / self._std
 
-        old_m = self._mean - delta_mean
-        self._std = np.sqrt(
-            (self._count * self._std ** 2 + X.shape[0] * np.std(X, axis=0) ** 2
-             + self._count * X.shape[0] * delta_mean ** 2 / total) / total
+        mean_val: np.ndarray = self._mean
+        std_val: np.ndarray = self._std
+        total = self._count + X.shape[0]
+        delta_mean = np.mean(X, axis=0) - mean_val
+        new_mean = mean_val + delta_mean * (X.shape[0] / total)
+        self._mean = new_mean
+
+        new_std = np.sqrt(
+            (self._count * (std_val ** 2) + X.shape[0] * (np.std(X, axis=0) ** 2)
+             + self._count * X.shape[0] * (delta_mean ** 2) / total) / total
         )
-        self._std[self._std == 0] = 1.0
+        new_std[new_std == 0] = 1.0
+        self._std = new_std
         self._count = total
 
         return (X - self._mean) / self._std
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         """Normalize features using fitted statistics."""
-        if not self._initialized:
+        if not self._initialized or self._mean is None or self._std is None:
             return X
         if X.ndim == 1:
             X = X.reshape(1, -1)
@@ -58,6 +69,6 @@ class FeatureNormalizer:
 
     def inverse_transform(self, X: np.ndarray) -> np.ndarray:
         """Denormalize features."""
-        if not self._initialized:
+        if not self._initialized or self._mean is None or self._std is None:
             return X
         return X * self._std + self._mean

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict
 import json
 
+from src.features.canonical import CANONICAL_FEATURE_NAMES
 from src.ml.training_data import TrainingDataGenerator, generate_training_data
 from src.ml.logistic import LogisticRegressionScratch
 from src.ml.anomaly import AnomalyDetector
@@ -169,14 +170,7 @@ class TrainingPipeline:
         abs_coefs = np.abs(coefs)
         normalized = abs_coefs / abs_coefs.sum()
 
-        feature_names = [
-            "face_present", "face_confidence", "face_count", "absence_ratio",
-            "head_yaw", "head_pitch", "head_roll",
-            "audio_rms", "audio_db", "audio_zcr", "audio_flag", "spectral",
-            "kb_idle", "kb_rate", "key_hold", "key_lat",
-            "mouse_speed", "mouse_dist", "click_rate", "mouse_idle",
-            "multi_face", "progress",
-        ]
+        feature_names = CANONICAL_FEATURE_NAMES
 
         importance = {
             name: float(coef)

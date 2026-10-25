@@ -17,13 +17,15 @@ class QuestionType(Enum):
 
 
 class AgentState(Enum):
+    """Canonical agent risk states."""
     NORMAL = "NORMAL"
+    MONITOR = "MONITOR"
     SUSPICIOUS = "SUSPICIOUS"
-    HIGH_RISK = "HIGH_RISK"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
     TECHNICAL_EVENT = "TECHNICAL_EVENT"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
-    MONITOR = "MONITOR"
+    # Maintained for backward compatibility
+    HIGH_RISK = "HIGH_RISK"
 
 
 @dataclass
@@ -94,6 +96,7 @@ class Exam:
         is_released: bool = False,
         settings: Optional[Dict[str, Any]] = None,
         created_at: Optional[datetime] = None,
+        created_by: Optional[str] = None,
         **kwargs
     ):
         self.exam_id = exam_id or kwargs.get("id", "")
@@ -107,6 +110,7 @@ class Exam:
         self.is_released = is_released
         self.settings = settings if settings is not None else {}
         self.created_at = created_at if created_at is not None else datetime.now()
+        self.created_by = created_by or kwargs.get("created_by")
 
     @property
     def id(self) -> str:
@@ -126,6 +130,7 @@ class Exam:
             "is_released": self.is_released,
             "settings": self.settings,
             "created_at": self.created_at.isoformat() if hasattr(self.created_at, "isoformat") else str(self.created_at),
+            "created_by": self.created_by,
             "questions": [q.to_dict(include_answer=include_answers) for q in self.questions],
         }
 

@@ -80,7 +80,7 @@ class ExamController:
         """Map risk score to agent state."""
         thresholds = self.config.get("risk", {})
         if risk_score >= thresholds.get("escalation_threshold", 0.7):
-            return AgentState.HIGH_RISK
+            return AgentState.REVIEW_REQUIRED
         elif risk_score >= thresholds.get("review_threshold", 0.5):
             return AgentState.SUSPICIOUS
         return AgentState.NORMAL
@@ -236,7 +236,8 @@ class ExamManager:
 
     def create_exam(self, exam_id: str, title: str, duration_minutes: int,
                     questions: list, instructions: str = "", passing_score: float = 40.0,
-                    topic: str = "", difficulty: str = "medium", settings: Optional[Dict[str, Any]] = None) -> Exam:
+                    topic: str = "", difficulty: str = "medium", settings: Optional[Dict[str, Any]] = None,
+                    created_by: Optional[str] = None) -> Exam:
         """Create a new exam and persist to DB."""
         exam = Exam(
             exam_id=exam_id,
@@ -248,14 +249,17 @@ class ExamManager:
             topic=topic,
             difficulty=difficulty,
             settings=settings or {},
+            created_by=created_by,
         )
         self._exams[exam_id] = exam
         db = self._get_db()
         if db:
             try:
-                db.save_exam(exam.to_dict())
-            except Exception:
-                pass
+                db.save_exam(exam.to_dict(), created_by=created_by)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to persist exam {exam_id}: {e}", exc_info=True)
+                raise
         return exam
 
     def add_exam(self, exam: Exam) -> None:

@@ -8,15 +8,18 @@ import sys
 import json
 import time
 import uuid
+import logging
+import numpy as np
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
+logger = logging.getLogger(__name__)
 
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, g
 from flask_cors import CORS
 
 # ── Backend imports ──────────────────────────────────────────────────────────
@@ -491,7 +494,7 @@ def list_exams():
     _u = _get_auth_db().get_session_user(_tok) if _tok else None
     _is_student = bool(_u and _u.get("role") == "student")
     for eid, exam in _exam_manager._exams.items():
-        if _is_student and not (_get_db().is_student_enrolled(eid, _u.get("username")) or _get_db().is_student_enrolled(eid, _u.get("user_id"))):
+        if _is_student and _u and not (_get_db().is_student_enrolled(eid, _u.get("username", "")) or _get_db().is_student_enrolled(eid, _u.get("user_id", ""))):
             continue
         exams.append({
             "exam_id": exam.exam_id,
@@ -509,11 +512,13 @@ def list_exams():
 def create_exam():
     data = request.get_json(force=True)
     exam_id = data.get("exam_id") or data.get("id") or f"exam_{uuid.uuid4().hex[:10]}"
+    creator = (g.current_user.get("username") or g.current_user.get("user_id")) if getattr(g, "current_user", None) else data.get("created_by", "examiner")
     exam = _exam_manager.create_exam(
         exam_id=exam_id,
         title=data.get("title", "Untitled Exam"),
         duration_minutes=data.get("duration_minutes", 60),
         questions=[],
+        created_by=creator,
     )
     exam.topic = data.get("topic", "")
     exam.difficulty = data.get("difficulty", "medium")
@@ -551,11 +556,13 @@ def create_exam():
             metadata=meta,
         )
 
+    creator = (g.current_user.get("username") or g.current_user.get("user_id")) if getattr(g, "current_user", None) else data.get("created_by", "examiner")
     # Persist in SQLite
     try:
-        _get_db().save_exam(exam.to_dict())
-    except Exception:
-        pass
+        _get_db().save_exam(exam.to_dict(), created_by=creator)
+    except Exception as e:
+        logger.error(f"Failed to persist exam {exam.exam_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to persist exam: {str(e)}"}), 500
 
     return jsonify({
         "exam_id": exam.exam_id,
@@ -623,8 +630,9 @@ def add_question(exam_id):
     )
     try:
         _get_db().save_exam(exam.to_dict())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Failed to persist question for exam {exam_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to persist question: {str(e)}"}), 500
     return jsonify({"question": q.to_dict(), "status": "added"})
 
 
@@ -659,8 +667,9 @@ def add_questions_bulk(exam_id):
         added.append(q.to_dict())
     try:
         _get_db().save_exam(exam.to_dict())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Failed to persist bulk questions for exam {exam_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to persist bulk questions: {str(e)}"}), 500
     return jsonify({"questions": added, "count": len(added)})
 
 
@@ -948,7 +957,7 @@ def create_session():
         "questions": [q.to_dict(include_answer=False) for q in exam.questions],
         "total_marks": sum(q.marks for q in exam.questions),
         "status": "started",
-        "is_preview": bool(is_authorized_preview),
+        "is_preview": is_authorized_preview,
     })
 
 
@@ -1057,6 +1066,8 @@ def end_session(student_id, exam_id):
         return jsonify({"error": "Session not found"}), 404
 
     session = controller.end_exam()
+    if not session:
+        return jsonify({"error": "Failed to end exam session"}), 500
 
     # Deactivate the DB session-meta record so it is not recovered on restart.
     session_key = f"{student_id}:{exam_id}"
@@ -1065,12 +1076,13 @@ def end_session(student_id, exam_id):
     except Exception:
         pass
 
+    ended_iso = session.end_time.isoformat() if hasattr(session.end_time, "isoformat") else (str(session.end_time) if session.end_time else None)
     return jsonify({
         "session_id": session.session_id,
         "status": "submitted",
         "answers_count": len(session.answers),
         "events_count": len(session.events),
-        "ended_at": session.end_time.isoformat() if session.end_time else None,
+        "ended_at": ended_iso,
     })
 
 
@@ -1124,8 +1136,10 @@ def post_answer_unified():
             return jsonify({"error": "Forbidden: Cannot submit answers for another student's session"}), 403
 
     # Submit answer in controller
-    if target_session_info and target_session_info.get("controller"):
-        target_session_info["controller"].submit_answer(question_id, answer)
+    if target_session_info:
+        ctrl = target_session_info.get("controller")
+        if ctrl and hasattr(ctrl, "submit_answer"):
+            ctrl.submit_answer(question_id, answer)
 
     # Persist to SQLite
     try:
@@ -1186,19 +1200,22 @@ def finish_exam_session(session_id):
         if session_student_id and session_student_id not in valid_ids:
             return jsonify({"error": "Forbidden: Cannot finish another student's session"}), 403
 
-    if target_session_info and target_session_info.get("controller"):
-        session = target_session_info["controller"].end_exam()
-        if target_session_key:
-            try:
-                _get_db().deactivate_session_meta(target_session_key)
-            except Exception:
-                pass
-        return jsonify({
-            "status": "submitted",
-            "session_id": session_id,
-            "answers_count": len(session.answers),
-            "ended_at": session.end_time.isoformat() if session.end_time else None,
-        })
+    if target_session_info:
+        ctrl = target_session_info.get("controller")
+        if ctrl and hasattr(ctrl, "end_exam"):
+            session = ctrl.end_exam()
+            if target_session_key:
+                try:
+                    _get_db().deactivate_session_meta(target_session_key)
+                except Exception:
+                    pass
+            ended_iso = session.end_time.isoformat() if hasattr(session, "end_time") and hasattr(session.end_time, "isoformat") else None
+            return jsonify({
+                "status": "submitted",
+                "session_id": session_id,
+                "answers_count": len(session.answers) if hasattr(session, "answers") else 0,
+                "ended_at": ended_iso,
+            })
 
     return jsonify({"status": "submitted", "session_id": session_id})
 
@@ -1609,7 +1626,7 @@ def examiner_overview(exam_id):
             "elapsed_seconds": status.get("elapsed_seconds", 0),
             "events_count": status.get("events_count", 0),
             "evidence_summary": evidence_summary,
-            "last_activity": session_info.get("started_at", ""),
+            "last_activity": session_info.get("started_at", "") if session_info else "",
         })
 
     avg_risk = (total_risk / len(students)) if students else 0.0
@@ -2137,14 +2154,9 @@ def generate_demo_answers():
     exam_id = data.get("exam_id")
     student_id = data.get("student_id", "STU001")
 
-    exam = _exam_manager.get_exam(exam_id)
+    exam = _exam_manager.get_exam(exam_id) if exam_id else None
     if not exam:
-        all_exams = _exam_manager.list_exams()
-        if all_exams:
-            exam = all_exams[0]
-            exam_id = exam.id
-        else:
-            return jsonify({"error": "Exam not found"}), 404
+        return jsonify({"error": f"Exam not found: {exam_id}"}), 404
 
 
     # Sample answers — mix of correct, partially correct, and incorrect
@@ -2881,110 +2893,100 @@ def predict_performance():
     student_id = data.get("student_id") or request.args.get("student_id") or ""
     features = data.get("features")
 
-    # If student has completed exams in DB, compute their actual observed scores
+    # Gather real completed session records from database
     db = _get_db()
     actual_score = None
+    all_completed = []
     try:
-        completed_sessions = [s for s in db.list_sessions(limit=200) if s.get("student_id") == student_id and s.get("total_score") is not None]
+        all_sessions = db.list_sessions(limit=500)
+        for s in all_sessions:
+            sid = s.get("session_id", "")
+            answers = db.get_answers(sid) if sid else []
+            if answers and any(a.get("score") is not None for a in answers):
+                s_copy = dict(s)
+                s_copy["total_score"] = sum(a.get("score") or 0.0 for a in answers)
+                s_copy["answers"] = answers
+                all_completed.append(s_copy)
     except Exception:
-        completed_sessions = []
-    if completed_sessions:
-        actual_score = float(completed_sessions[-1]["total_score"])
+        all_completed = []
 
-    # If features are not provided, or student has no history to train predictor
-    if not features or len(features) < 3:
-        if completed_sessions and len(completed_sessions) >= 3:
-            scores = [float(s["total_score"]) for s in completed_sessions]
-            pred_score = round(float(np.mean(scores)), 2)
-            std = float(np.std(scores)) if len(scores) > 1 else 3.5
-            return jsonify({
-                "status": "success",
-                "student_id": student_id,
-                "prediction": pred_score,
-                "predicted_score": pred_score,
-                "actual_score": actual_score,
-                "prediction_model_version": "v1.2.0-ridge-calibrated",
-                "prediction_basis": "historical_completed_exams",
-                "prediction_interval": {
-                    "lower_bound": round(max(0.0, pred_score - 1.96 * std), 2),
-                    "upper_bound": round(min(100.0, pred_score + 1.96 * std), 2),
-                    "std_dev": round(std, 2),
-                    "confidence_level": 0.95
-                }
-            })
-        elif student_id == "test_student_honest":
-            return jsonify({
-                "status": "success",
-                "student_id": student_id,
-                "prediction": 78.5,
-                "predicted_score": 78.5,
-                "actual_score": actual_score,
-                "prediction_model_version": "v1.2.0-ridge-calibrated",
-                "prediction_basis": "historical_mastery_and_interaction",
-                "prediction_interval": {
-                    "lower_bound": 71.2,
-                    "upper_bound": 85.8,
-                    "std_dev": 3.72,
-                    "confidence_level": 0.95
-                }
-            })
-        return jsonify({
-            "status": "insufficient_data",
-            "prediction": None,
-            "predicted_score": None,
-            "actual_score": actual_score,
-            "prediction_model_version": "v1.2.0-ridge-calibrated",
-            "prediction_basis": "none",
-            "prediction_interval": {
-                "lower_bound": None,
-                "upper_bound": None,
-                "confidence_level": 0.95
-            },
-            "message": "Insufficient student history to generate statistically valid performance prediction"
-        })
+    student_completed = [s for s in all_completed if s.get("student_id") == student_id]
+    if student_completed:
+        actual_score = float(student_completed[-1]["total_score"])
 
-    # When explicit features vector is passed
-    try:
-        f_arr = np.array(features, dtype=float).reshape(1, -1)
-        predictor = PerformancePredictor()
-        X_ref = np.array([
-            [0.2, 0.3, 0.4, 0.5],
-            [0.5, 0.6, 0.7, 0.8],
-            [0.8, 0.8, 0.9, 0.9],
-            [0.3, 0.4, 0.5, 0.6],
-        ])
-        y_ref = np.array([55.0, 75.0, 92.0, 62.0])
-        predictor.fit(X_ref, y_ref)
-        pred_val = float(predictor.predict(f_arr)[0])
-        pred_val = round(min(100.0, max(0.0, pred_val)), 2)
-        std = 4.2
-        return jsonify({
-            "status": "success",
-            "student_id": student_id,
-            "prediction": pred_val,
-            "predicted_score": pred_val,
-            "actual_score": actual_score,
-            "prediction_model_version": "v1.2.0-ridge-calibrated",
-            "prediction_basis": "feature_vector_regression",
-            "prediction_interval": {
-                "lower_bound": round(max(0.0, pred_val - 1.96 * std), 2),
-                "upper_bound": round(min(100.0, pred_val + 1.96 * std), 2),
-                "std_dev": std,
-                "confidence_level": 0.95
-            }
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "insufficient_data",
-            "prediction": None,
-            "message": f"Could not compute prediction: {str(e)}",
-            "prediction_model_version": "v1.2.0-ridge-calibrated",
-            "prediction_interval": {
-                "lower_bound": None,
-                "upper_bound": None,
-                "confidence_level": 0.95
-            }
-        })
+    # Extract training data from real completed sessions in database: [accuracy, risk_score, duration_fraction]
+    X_train_list = []
+    y_train_list = []
+    for s in all_completed:
+        answers = s.get("answers", [])
+        if answers:
+            correct_cnt = sum(1 for a in answers if float(a.get("score") or 0.0) > 0)
+            acc = correct_cnt / len(answers)
+        else:
+            acc = float(s.get("total_score") or 0.0) / 100.0
+        risk = float(s.get("risk_score") or 0.0)
+        dur = float(s.get("duration_minutes") or 30.0) / 60.0
+        X_train_list.append([acc, risk, dur])
+        y_train_list.append(float(s["total_score"]))
+
+    # Check if we have sufficient real historical data (minimum 3 samples required by PerformancePredictor)
+    if len(X_train_list) >= 3:
+        try:
+            X_real = np.array(X_train_list, dtype=float)
+            y_real = np.array(y_train_list, dtype=float)
+            predictor = PerformancePredictor()
+            predictor.fit(X_real, y_real, feature_names=["accuracy", "risk_score", "duration_fraction"])
+
+            # Determine feature vector for target student
+            if features and len(features) >= 3:
+                f_target = np.array(features[:3], dtype=float).reshape(1, -1)
+            elif student_completed:
+                latest = student_completed[-1]
+                s_answers = db.get_answers(latest.get("session_id", ""))
+                s_acc = sum(1 for a in s_answers if float(a.get("score") or 0.0) > 0) / len(s_answers) if s_answers else ((float(actual_score) / 100.0) if actual_score is not None else 0.5)
+                s_risk = float(latest.get("risk_score") or 0.0)
+                s_dur = float(latest.get("duration_minutes") or 30.0) / 60.0
+                f_target = np.array([[s_acc, s_risk, s_dur]], dtype=float)
+            else:
+                f_target = None
+
+            if f_target is not None:
+                conf_result = predictor.predict_with_confidence(f_target)
+                pred_val = round(min(100.0, max(0.0, conf_result["predicted_score"])), 2)
+                return jsonify({
+                    "status": "success",
+                    "student_id": student_id,
+                    "prediction": pred_val,
+                    "predicted_score": pred_val,
+                    "actual_score": actual_score,
+                    "prediction_model_version": "v1.0.0-rf-linear-ensemble",
+                    "prediction_basis": "real_historical_session_regression",
+                    "prediction_interval": {
+                        "lower_bound": round(conf_result["lower_bound"], 2),
+                        "upper_bound": round(conf_result["upper_bound"], 2),
+                        "std_dev": round(conf_result["std_dev"], 2),
+                        "confidence_level": 0.95
+                    }
+                })
+        except Exception as e:
+            logger.warning(f"PerformancePredictor inference failed on real data: {e}")
+
+    # Explicit, honest result when real data is insufficient
+    return jsonify({
+        "status": "insufficient_data",
+        "student_id": student_id,
+        "prediction": None,
+        "predicted_score": None,
+        "actual_score": actual_score,
+        "prediction_model_version": "v1.0.0-rf-linear-ensemble",
+        "prediction_basis": "none",
+        "prediction_interval": {
+            "lower_bound": None,
+            "upper_bound": None,
+            "confidence_level": 0.95
+        },
+        "message": "Insufficient student history to generate statistically valid performance prediction"
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3011,14 +3013,9 @@ def submit_answers():
     _cu = _get_auth_db().get_session_user(_tok) if _tok else None
     _student_caller = bool(_cu and _cu.get("role") == "student")
 
-    exam = _exam_manager.get_exam(exam_id)
+    exam = _exam_manager.get_exam(exam_id) if exam_id else None
     if not exam:
-        all_exams = _exam_manager.list_exams()
-        if all_exams and not _student_caller:
-            exam = all_exams[0]
-            exam_id = exam.id
-        else:
-            return jsonify({"error": "Exam not found"}), 404
+        return jsonify({"error": "Exam not found"}), 404
 
     # Students may submit exactly once and never see scores from this endpoint
     # (otherwise repeated submissions could be used to brute-force the answer key).
@@ -3095,6 +3092,11 @@ def submit_answers():
             }
         persisted = True
     except Exception as e:
+        if db:
+            try:
+                db._conn.rollback()
+            except Exception:
+                pass
         per_question_persisted = {"persistence_error": str(e)}
 
     response = {
@@ -3171,13 +3173,15 @@ def grade_override():
     original_score = data.get("original_score")
     if original_score is None:
         original_score = data.get("previous_score", 0.0)
-    examiner_id = data.get("examiner_id")
     reason = data.get("reason", "")
-
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user = _get_auth_db().get_session_user(token) if token else None
-    if user:
-        examiner_id = examiner_id or user.get("username", user.get("user_id"))
+    current_user = getattr(g, "current_user", None)
+    if not current_user:
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        current_user = _get_auth_db().get_session_user(token) if token else None
+    if current_user:
+        examiner_id = current_user.get("username") or current_user.get("user_id")
+    else:
+        examiner_id = data.get("examiner_id") or "examiner"
 
     if not session_id or not question_id or override_score is None:
         return jsonify({"error": "session_id (or submission_id), question_id, and override_score are required"}), 400
@@ -3191,7 +3195,7 @@ def grade_override():
     db = _get_db()
     session_id = _canonical_session_id(str(session_id))
     override_id = db.record_grade_override(
-        session_id=str(session_id),
+        session_id=session_id,
         question_id=str(question_id),
         previous_score=prev_score,
         new_score=new_score,
@@ -3237,10 +3241,14 @@ def examiner_action_api():
     if not session_id and student_id and exam_id:
         session_id = f"{student_id}:{exam_id}"
 
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user = _get_auth_db().get_session_user(token) if token else None
-    if user:
-        examiner_id = examiner_id or user.get("username", user.get("user_id"))
+    current_user = getattr(g, "current_user", None)
+    if not current_user:
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        current_user = _get_auth_db().get_session_user(token) if token else None
+    if current_user:
+        examiner_id = current_user.get("username") or current_user.get("user_id")
+    else:
+        examiner_id = data.get("examiner_id") or "examiner"
 
     valid_actions = ("warn", "flag", "pause", "resume", "terminate", "note")
     if not action_type or action_type not in valid_actions:
@@ -3350,7 +3358,7 @@ def submit_student_appeal():
     db = _get_db()
     session_id = _find_session_id(student_id, exam_id) or f"{student_id}:{exam_id}"
     action_id = db.record_examiner_action(
-        session_id=str(session_id),
+        session_id=session_id,
         action_type="appeal",
         message=f"Student appeal: {reason}",
         examiner_id=str(student_id),
@@ -4446,13 +4454,17 @@ def _rule_hit(rules, method, path):
 
 @app.before_request
 def _rbac_guard():
+    g.current_user = None
+    token = (request.headers.get("Authorization", "") or "").replace("Bearer ", "", 1).strip()
+    user = _get_auth_db().get_session_user(token) if token else None
+    if user:
+        g.current_user = user
+
     if _os_rbac.environ.get("EXAM_AGENT_AUTH_ENFORCE", "1") == "0" or request.method == "OPTIONS":
         return None
     path = request.path
     if not path.startswith("/api/") or _rule_hit(_PUBLIC_RULES, request.method, path):
         return None
-    token = (request.headers.get("Authorization", "") or "").replace("Bearer ", "", 1).strip()
-    user = _get_auth_db().get_session_user(token) if token else None
     if not user:
         return jsonify({"error": "Authentication required"}), 401
     role = user.get("role")

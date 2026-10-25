@@ -67,32 +67,35 @@ class BehaviorClass(Enum):
     MULTI_SIGNAL = 8
 
 
-# ─── Feature Index Constants ────────────────────────────────────────────────
-
-IX_FACE_PRESENT = 0
-IX_FACE_CONF = 1
-IX_FACE_COUNT = 2
-IX_ABSENCE_RATIO = 3
-IX_HEAD_YAW = 4
-IX_HEAD_PITCH = 5
-IX_HEAD_ROLL = 6
-IX_AUDIO_RMS = 7
-IX_AUDIO_DB = 8
-IX_AUDIO_ZCR = 9
-IX_AUDIO_FLAG = 10
-IX_SPECTRAL = 11
-IX_KB_IDLE = 12
-IX_KB_RATE = 13
-IX_KEY_HOLD = 14
-IX_KEY_LAT = 15
-IX_MOUSE_SPD = 16
-IX_MOUSE_DIST = 17
-IX_CLICK_RATE = 18
-IX_MOUSE_IDLE = 19
-IX_MULTI_FACE = 20
-IX_PROGRESS = 21
-
-N_FEATURES = 22
+# ─── Feature Index Constants (Authoritative from canonical contract) ────────
+from src.features.canonical import (
+    CANONICAL_FEATURE_NAMES,
+    CANONICAL_INDICES,
+    N_CANONICAL_FEATURES,
+    N_FEATURES,
+    IX_FACE_PRESENT,
+    IX_FACE_CONF,
+    IX_FACE_COUNT,
+    IX_ABSENCE_RATIO,
+    IX_HEAD_YAW,
+    IX_HEAD_PITCH,
+    IX_HEAD_ROLL,
+    IX_AUDIO_RMS,
+    IX_AUDIO_DB,
+    IX_AUDIO_ZCR,
+    IX_AUDIO_FLAG,
+    IX_SPECTRAL,
+    IX_KB_IDLE,
+    IX_KB_RATE,
+    IX_KEY_HOLD,
+    IX_KEY_LAT,
+    IX_MOUSE_SPD,
+    IX_MOUSE_DIST,
+    IX_CLICK_RATE,
+    IX_MOUSE_IDLE,
+    IX_MULTI_FACE,
+    IX_PROGRESS,
+)
 
 
 # ─── Normal Behavior Profiles ──────────────────────────────────────────────
