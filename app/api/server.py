@@ -1761,89 +1761,6 @@ def generate_examiner_report():
     return jsonify(report)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  PERFORMANCE PREDICTION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.route("/api/predict/performance", methods=["POST"])
-def predict_performance():
-    data = request.get_json(force=True) if request.data else {}
-    if not data:
-        data = {}
-    session_key = data.get("session_key") or data.get("student_id") or "default"
-    student_id = data.get("student_id") or session_key.split(":")[0]
-    features_list = data.get("features", [])
-
-    import numpy as np
-    features = np.array(features_list) if features_list else np.array([])
-    if features.ndim == 1 and features.size > 0:
-        features = features.reshape(1, -1)
-
-    predictor = _performance_predictors.get(session_key)
-    if not predictor:
-        predictor = PerformancePredictor()
-        _performance_predictors[session_key] = predictor
-
-    if not getattr(predictor, "_fitted", False):
-        # Attempt to fit model on historical submission data from the database
-        db = _get_db()
-        submissions = db.list_sessions(limit=50)
-        valid_samples = []
-        target_scores = []
-        for s in (submissions or []):
-            score = s.get("score")
-            feat = s.get("features")
-            if score is not None and feat and isinstance(feat, list):
-                valid_samples.append(feat)
-                target_scores.append(float(score))
-
-        if len(valid_samples) >= 3 and features.size > 0 and len(valid_samples[0]) == features.shape[1]:
-            try:
-                predictor.fit(np.array(valid_samples), np.array(target_scores))
-            except Exception:
-                pass
-
-    if not getattr(predictor, "_fitted", False):
-        return jsonify({
-            "status": "insufficient_data",
-            "session_key": session_key,
-            "message": "At least 3 graded past submissions required to fit prediction model",
-            "prediction": None,
-            "score": None,
-        })
-
-    if features.size > 0:
-        try:
-            result = predictor.predict(features)
-            pred_list = result.tolist() if hasattr(result, "tolist") else list(result)
-            val = pred_list[0] if isinstance(pred_list, list) and len(pred_list) == 1 else pred_list
-            score_val = round(float(val if isinstance(val, (int, float)) else val[0]), 2)
-            conf_payload = {}
-            try:
-                conf_payload = predictor.predict_with_confidence(features)
-            except Exception:
-                pass
-            return jsonify({
-                "status": "success",
-                "session_key": session_key,
-                "prediction": val,
-                "score": score_val,
-                "model_version": "v1.2 (Ensemble RF + Linear)",
-                "confidence": conf_payload.get("confidence", "standard"),
-                "lower_bound": conf_payload.get("lower_bound"),
-                "upper_bound": conf_payload.get("upper_bound"),
-                "std_dev": conf_payload.get("std_dev"),
-            })
-        except Exception as e:
-            return jsonify({"status": "error", "message": str(e), "session_key": session_key}), 400
-
-    return jsonify({
-        "status": "insufficient_data",
-        "session_key": session_key,
-        "message": "No feature vector provided for prediction",
-        "prediction": None,
-        "score": None,
-    })
 
 
 @app.route("/api/predict/difficulty", methods=["POST"])
@@ -2938,7 +2855,9 @@ def predict_performance():
             predictor.fit(X_real, y_real, feature_names=["accuracy", "risk_score", "duration_fraction"])
 
             # Determine feature vector for target student
-            if features and len(features) >= 3:
+            if student_id and not student_completed:
+                f_target = None
+            elif features and len(features) >= 3:
                 f_target = np.array(features[:3], dtype=float).reshape(1, -1)
             elif student_completed:
                 latest = student_completed[-1]

@@ -212,10 +212,11 @@ def extract_canonical_features(signals: Dict[str, Any],
         vec[IX_SPECTRAL] = 0.0
 
     # Keyboard features
-    kb_idle_sec = signals.get("keyboard_idle_seconds", 0)
+    kb = signals.get("keyboard", {}) or {}
+    kb_idle_sec = signals.get("keyboard_idle_seconds", kb.get("idle_seconds", 0))
     vec[IX_KB_IDLE] = 1.0 if (float(kb_idle_sec) > 10.0 or signals.get("idle_keyboard", False) or signals.get("keyboard_idle_flag", False)) else 0.0
 
-    kb_events_pm = signals.get("keyboard_events_per_minute", signals.get("typing_wpm", 0.0) * 5.0)
+    kb_events_pm = signals.get("keyboard_events_per_minute", kb.get("events_per_minute", signals.get("typing_wpm", 0.0) * 5.0))
     try:
         f_pm = float(kb_events_pm)
         norm_pm = f_pm / 200.0 if f_pm > 1.0 else f_pm
@@ -223,7 +224,7 @@ def extract_canonical_features(signals: Dict[str, Any],
     except (ValueError, TypeError):
         vec[IX_KB_RATE] = 0.0
 
-    raw_hold = signals.get("key_hold_mean", signals.get("mean_key_hold_ms", 120.0) / 1000.0)
+    raw_hold = signals.get("key_hold_mean", kb.get("mean_key_hold", signals.get("mean_key_hold_ms", 120.0) / 1000.0))
     try:
         f_hold = float(raw_hold)
         norm_hold = f_hold / 0.5 if f_hold > 1.0 else f_hold
@@ -231,7 +232,7 @@ def extract_canonical_features(signals: Dict[str, Any],
     except (ValueError, TypeError):
         vec[IX_KEY_HOLD] = 0.24
 
-    raw_lat = signals.get("key_latency_mean", signals.get("mean_latency_ms", 100.0) / 1000.0)
+    raw_lat = signals.get("key_latency_mean", kb.get("mean_latency", signals.get("mean_latency_ms", 100.0) / 1000.0))
     try:
         f_lat = float(raw_lat)
         norm_lat = f_lat / 1.0 if f_lat > 1.0 else f_lat
@@ -240,7 +241,8 @@ def extract_canonical_features(signals: Dict[str, Any],
         vec[IX_KEY_LAT] = 0.10
 
     # Mouse features
-    mouse_spd = signals.get("mouse_avg_speed", signals.get("mouse_velocity", 0.0))
+    mouse = signals.get("mouse", {}) or {}
+    mouse_spd = signals.get("mouse_avg_speed", mouse.get("avg_speed", signals.get("mouse_velocity", 0.0)))
     try:
         f_spd = float(mouse_spd)
         norm_spd = f_spd / 500.0 if f_spd > 1.0 else f_spd
@@ -248,7 +250,7 @@ def extract_canonical_features(signals: Dict[str, Any],
     except (ValueError, TypeError):
         vec[IX_MOUSE_SPD] = 0.0
 
-    mouse_dist = signals.get("mouse_total_distance", 0.0)
+    mouse_dist = signals.get("mouse_total_distance", mouse.get("total_distance", 0.0))
     try:
         f_dist = float(mouse_dist)
         norm_dist = f_dist / 2000.0 if f_dist > 1.0 else f_dist
@@ -256,7 +258,7 @@ def extract_canonical_features(signals: Dict[str, Any],
     except (ValueError, TypeError):
         vec[IX_MOUSE_DIST] = 0.0
 
-    clicks = signals.get("mouse_click_count", signals.get("mouse_clicks", 0.0))
+    clicks = signals.get("mouse_click_count", mouse.get("click_count", mouse.get("clicks", signals.get("mouse_clicks", 0.0))))
     try:
         f_clk = float(clicks)
         norm_clk = f_clk / 50.0 if f_clk > 1.0 else f_clk
@@ -264,7 +266,7 @@ def extract_canonical_features(signals: Dict[str, Any],
     except (ValueError, TypeError):
         vec[IX_CLICK_RATE] = 0.0
 
-    mouse_idle_sec = signals.get("mouse_idle_seconds", 0)
+    mouse_idle_sec = signals.get("mouse_idle_seconds", mouse.get("idle_seconds", 0))
     vec[IX_MOUSE_IDLE] = 1.0 if (float(mouse_idle_sec) > 10.0 or signals.get("idle_mouse", False) or signals.get("mouse_idle_flag", False)) else 0.0
 
     # Temporal & context features

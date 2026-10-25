@@ -113,6 +113,14 @@ class ProctoringAgent:
             self._anomaly_model = ano_m
             self.risk_engine.set_anomaly_model(ano_m)
 
+    def set_logistic_model(self, model: LogisticRegressionScratch) -> None:
+        """Attach trained logistic regression model."""
+        self.set_models(logistic=model)
+
+    def set_anomaly_model(self, model: AnomalyDetector) -> None:
+        """Attach trained anomaly detector model."""
+        self.set_models(anomaly=model)
+
     def set_callbacks(self, on_state_change: Optional[Callable] = None,
                       on_alert: Optional[Callable] = None) -> None:
         """Set event callbacks."""
