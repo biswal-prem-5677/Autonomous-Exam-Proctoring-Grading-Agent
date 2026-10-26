@@ -3,42 +3,43 @@
 ## Software Deliverables
 
 ### 1. Core Application
-- `main.py` — CLI entry point with demo, grade, and test commands
-- `app/student/exam.py` — Streamlit student exam interface
-- `app/examiner/dashboard.py` — Streamlit examiner dashboard
+- `main.py` — CLI & Flask web server entry point with `serve`, `create-user`, `demo`, `grade`, and `test` commands
+- `app/api/server.py` — Unified REST API & route handlers (3,400+ lines, 76 endpoints)
+- `app/templates/` — Jinja2 HTML templates for all role-based interfaces
 
-### 2. Source Code Modules
+### 2. Source Code Modules (12,000+ lines)
 
 #### Exam Engine (`src/exam/`)
-- `exam.py` — Exam configuration and rules
-- `questions.py` — Question data model
-- `session.py` — Exam session management
+- `exam.py` — Exam configuration, rules, and lifecycle
+- `questions.py` — Question data model (MCQ, numerical, short/long answer, math, code, true/false)
+- `session.py` — Exam session management with timer and auto-submit
 
 #### Sensors (`src/sensors/`)
-- `webcam.py` — MediaPipe face detection with OpenCV
-- `keyboard.py` — Keystroke event tracking
-- `mouse.py` — Mouse movement/click tracking
-- `__init__.py`
+- `webcam.py` — MediaPipe face detection with OpenCV Haar cascade fallback
+- `keyboard.py` — Keystroke event tracking (hold time, inter-key latency, idle detection, clipboard)
+- `mouse.py` — Mouse movement/click tracking (velocity, distance, idle detection)
 
 #### Vision (`src/vision/`)
 - `face.py` — Face detection and count
 - `landmarks.py` — Facial landmark extraction
-- `head_pose.py` — Head orientation estimation
-- `movement.py` — Frame-to-frame movement analysis
+- `head_pose.py` — Head orientation estimation (yaw/pitch/roll)
+- `movement.py` — Frame-to-frame displacement tracking
 
 #### Audio (`src/audio/`)
-- `processor.py` — RMS, FFT, ZCR, spectral features
+- `processor.py` — RMS energy, FFT, ZCR, spectral centroid features
 
 #### Feature Engineering (`src/features/`)
-- `behavioral.py` — 22-dimensional behavioral feature extraction
+- `canonical.py` — **Canonical 22-dimensional feature schema** (authoritative single source of truth)
+- `behavioral.py` — Behavioral feature extraction using canonical schema
 - `temporal.py` — Rolling window aggregation with trend detection
 - `normalization.py` — Z-score normalization with inverse transform
 
 #### ML Models (`src/ml/`)
-- `logistic.py` — Logistic regression from scratch (gradient descent)
+- `logistic.py` — Logistic regression from scratch (gradient descent, L2 regularization)
 - `anomaly.py` — Z-score + Mahalanobis anomaly detection
 - `regression.py` — Linear and Random Forest regression
-- `calibration.py` — Threshold calibration, model evaluation
+- `calibration.py` — Threshold calibration, model evaluation, ROC-AUC
+- `pipeline.py` — Training data generation and model pipeline
 
 #### Grading Engine (`src/grading/`)
 - `mcq.py` — MCQ and true/false grading
@@ -46,51 +47,94 @@
 - `tfidf.py` — Self-implemented TF-IDF vectorization
 - `similarity.py` — Cosine similarity computation
 - `scorer.py` — Unified grading orchestrator
+- `plagiarism.py` — Cohort plagiarism detection
+- `consensus.py` — Inter-grader consensus scoring
 
 #### Autonomous Agent (`src/agent/`)
-- `state.py` — State machine with valid transitions
+- `controller.py` — Full OBSERVE→PERCEIVE→FEATUREIZE→PREDICT→REASON→DECIDE→ACT loop (643 lines)
 - `risk.py` — Multi-signal risk fusion engine
-- `memory.py` — Temporal evidence memory with sliding window
-- `controller.py` — Full agent loop (OBSERVE→PERCEIVE→FEATUREIZE→PREDICT→REASON→DECIDE→ACT)
+- `memory.py` — Temporal evidence memory with sliding window and exponential decay
+- `state.py` — State machine with valid transitions (NORMAL→SUSPICIOUS→HIGH_RISK→REVIEW_REQUIRED)
+- `counterfactual.py` — Counterfactual risk replay engine
+- `uncertainty.py` — Uncertainty quantification engine
+- `technical.py` — Technical event engine
+
+#### Cross-Modal Fusion (`src/fusion/`)
+- Cross-modal corroboration and contradiction detection
 
 #### Prediction (`src/prediction/`)
-- `performance.py` — Score prediction
-- `difficulty.py` — Question difficulty analysis
-- `knowledge.py` — Student knowledge profile
+- `performance.py` — Score prediction using trained regression models
+- `difficulty.py` — Question difficulty analysis (Item Response Theory)
+- `knowledge.py` — Student knowledge profiling (Bayesian knowledge tracing)
 
 #### Reports (`src/reports/`)
 - `evidence.py` — Evidence timeline log
-- `student_report.py` — Per-student report generator
-- `examiner_report.py` — Class-level examiner report
+- `student_report.py` — Individual student reports
+- `examiner_report.py` — Class-level analytics
+
+#### Trace & Audit (`src/trace/`)
+- `audit_chain.py` — SHA-256 tamper-evident hash chain
+- `replay.py` — Forensic replay engine
+- Decision trace builder with explainability
+
+#### Database Layer (`src/database/`)
+- SQLite with WAL journaling, thread-local connections
+- Auth/RBAC tables with JWT + bcrypt
+- Exam, session, roster, override, and action persistence
 
 #### Data Models (`src/models/`)
-- `models.py` — Question, ExamSession, ProctoringEvent dataclasses
+- `models.py` — Question, ExamSession, ProctoringEvent, AgentState dataclasses
 
 #### Utilities (`src/utils/`)
-- `config.py` — Configuration loading
+- `config.py` — Configuration loading from `config/default.yaml`
 
-### 3. Data
+### 3. Web Application (12,700+ lines)
+
+#### API Server (`app/api/server.py`)
+- 76 REST endpoints covering exam CRUD, session management, proctoring telemetry, grading, analytics, training, and admin
+
+#### Frontend Templates (`app/templates/`)
+- `base.html` — Unified navigation layout with role gating
+- `index.html` — Public landing portal
+- `dashboard.html` — Admin & session dashboard
+- `analytics.html` — Real database performance analytics
+- `training.html` — ML training & calibration studio
+- `examiner_dashboard.html` — Examiner live monitor & interventions
+- `auth/` — Login & registration views
+- `examiner/` — Create exam, grading, explainability interfaces
+- `monitor/` — Live telemetry & trace replay
+- `student/` — Proctored exam runner & results views
+
+### 4. Data
 - `data/sample_data.py` — Sample questions, student answers, proctoring events
-- `data/__init__.py`
 
-### 4. Configuration
+### 5. Configuration
 - `config/default.yaml` — All configurable thresholds and settings
+- `.env.example` — Environment variable template
 
-### 5. Tests
-- `tests/test_agent.py` — Comprehensive test suite (50+ tests)
-- `tests/__init__.py`
+### 6. Tests (5,500+ lines, 400+ tests)
+- `tests/test_agent.py` — Core agent tests
+- `tests/test_defect_regressions.py` — Regression test suite for all 13 defect fixes
+- `tests/test_ui_e2e.py` — End-to-end browser & workflow tests
+- `tests/test_sandbox.py` — Code execution sandbox security tests
+- `tests/test_vision.py` — Face tracking & posture tests
+- `tests/test_world_class_agent.py` — End-to-end system integration tests
+- `tests/test_independent_certification.py` — Independent production certification suite
 
-### 6. Documentation
+### 7. Documentation
 - `README.md` — Project overview, architecture, quick start
-- `PLANNING.md` — Detailed project plan and architecture decisions
-- `FEATURES.md` — Complete feature list with priorities
-- `TASKS.md` — Task tracking
-- `FLOW.md` — Data and control flow diagrams
-- `HOW_TO_USE.md` — Usage guide for students and examiners
-- `SECURITY.md` — Security and privacy documentation
-- `CONTEXT.md` — Project context graph for session continuity
-- `EXECUTION_RULES.md` — Rules for all development sessions
-- `CHANGELOG.md` — Version history
+- `docs/planning.md` — Architecture & design documentation
+- `docs/flow.md` — Data and control flow diagrams
+- `docs/deliverables.md` — This file
+- `docs/how_to_use.md` — Usage guide for students and examiners
+- `docs/security.md` — Security and privacy documentation
+- `docs/context.md` — Project context graph
+- `docs/execution_rules.md` — Development session rules
+- `docs/FEATURE_IMPLEMENTATION_MATRIX.md` — Feature implementation status
+- `docs/TEST_INTEGRITY_AUDIT.md` — Test integrity audit
+- `docs/UI_TRACEABILITY.md` — Complete route & class traceability matrix
+- `docs/VERIFICATION_MATRIX.md` — Verification matrix
+- `docs/report/main.tex` — Comprehensive LaTeX project report (20+ pages)
 
 ---
 
@@ -100,17 +144,18 @@
 
 | Algorithm | File | Formula |
 |-----------|------|---------|
-| Logistic Regression | `src/ml/logistic.py` | σ(z) = 1/(1+e^(-z)), gradient descent |
-| Sigmoid | `src/ml/logistic.py` | Stable implementation avoiding overflow |
-| Binary Cross-Entropy | `src/ml/logistic.py` | -[y·log(p) + (1-y)·log(1-p)] + L2 reg |
+| Logistic Regression | `src/ml/logistic.py` | σ(z) = 1/(1+e^(-z)), gradient descent with L2 |
+| Stable Sigmoid | `src/ml/logistic.py` | Piecewise stable implementation avoiding overflow |
+| Binary Cross-Entropy | `src/ml/logistic.py` | -[y·log(p) + (1-y)·log(1-p)] + λ/(2m)·Σw² |
 | Z-score | `src/ml/anomaly.py` | z_i = (x_i - μ_i) / σ_i |
 | Mahalanobis Distance | `src/ml/anomaly.py` | D_M = sqrt((x-μ)^T Σ^(-1) (x-μ)) |
 | Risk Decay | `src/agent/memory.py` | R_t = α·R_{t-1} + (1-α)·E_t |
 | Risk Fusion | `src/agent/risk.py` | R = 0.40·base + 0.35·severity + 0.25·convergence |
+| ML Refinement | `src/agent/risk.py` | R = 0.60·base + 0.40·logistic |
 | TF-IDF | `src/grading/tfidf.py` | TF·IDF = (count/Σ) × log(N/(1+DF)) |
 | Cosine Similarity | `src/grading/tfidf.py` | (A·B)/(||A||·||B||) |
-| Risk Decay Formula | `src/agent/risk.py` | R_t = α × R_{t-1} + (1-α) × E_t |
 | Temporal Trend | `src/features/temporal.py` | np.polyfit linear slope |
+| Audit Chain | `src/trace/audit_chain.py` | H_n = SHA-256(H_{n-1} || data_n || ts_n) |
 
 ---
 
@@ -139,10 +184,12 @@
 | Evidence Log | 5 | ✅ Passing |
 | Student Report | 3 | ✅ Passing |
 | Examiner Report | 3 | ✅ Passing |
-| Sample Data | 6 | ✅ Passing |
-| End-to-End Demo | 1 | ✅ Passing |
+| Defect Regressions | 13 | ✅ Passing |
+| Independent Certification | 12 | ✅ Passing |
+| UI End-to-End | 15 | ✅ Passing |
+| API Integration | 50+ | ✅ Passing |
 
-**Total: ~85 tests**
+**Total: 400+ tests**
 
 ---
 
@@ -158,7 +205,7 @@
 - Risk score ∈ [0, 1]
 - Precision, Recall, F1 (when ground truth available)
 - False Positive Rate
-- State transitions (NORMAL → SUSPICIOUS → HIGH_RISK)
+- State transitions (NORMAL → SUSPICIOUS → HIGH_RISK → REVIEW_REQUIRED)
 
 ### Model Metrics
 - **Classification**: Accuracy, Precision, Recall, F1, ROC-AUC
@@ -177,20 +224,19 @@ pip install -r requirements.txt
 
 ### Run Commands
 ```bash
-# Run full demo
-python main.py demo
+# Start the web application
+python main.py serve
 
-# Grade answers from JSON
-python main.py grade answers.json
+# Create user accounts
+python main.py create-user --username admin --password admin123 --role admin
+python main.py create-user --username examiner1 --password exam123 --role examiner
+python main.py create-user --username student1 --password stu123 --role student
 
 # Run tests
-python main.py test
+python -m pytest
 
-# Student exam UI
-streamlit run app/student/exam.py
-
-# Examiner dashboard
-streamlit run app/examiner/dashboard.py
+# Open in browser
+# http://localhost:5000
 ```
 
 ### No External Dependencies
